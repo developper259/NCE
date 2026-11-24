@@ -144,3 +144,36 @@ test("LanguageApplicationService applies a plan through the injected PackageMana
   assert.ok(events.length > 0);
   assert.ok(events.every((event) => typeof event.componentId === "string"));
 });
+
+test("installing the Python language server announces the Node.js it needs", () => {
+  // Pyright is a JavaScript program: the pyright package depends on node. That
+  // dependency is legitimate, but a JavaScript runtime downloading during a
+  // Python install must be explained, not discovered.
+  const view = service.view("python", snapshot(), ["python.runtime", "python.lsp"]);
+  const node = view.packageDependencies.find((entry) => entry.packageId === "node");
+  assert.ok(node, "the Node.js dependency is reported");
+  assert.equal(node.packageName, "JavaScript & TypeScript");
+  assert.equal(node.requiredBy, "Pyright Language Server");
+  assert.equal(node.installed, false);
+});
+
+test("an already installed dependency is not announced as a new download", () => {
+  const view = service.view(
+    "python",
+    snapshot({ python: "installed", pyright: "installed", node: "installed" }),
+    ["python.runtime", "python.lsp"],
+  );
+  const node = view.packageDependencies.find((entry) => entry.packageId === "node");
+  assert.equal(node.installed, true);
+});
+
+test("Python never reports a JavaScript component as its own", () => {
+  // The component graph and the package graph must stay distinct: node is a
+  // package dependency of pyright, never a component of the Python language.
+  const view = service.view("python", snapshot(), ["python.runtime", "python.lsp"]);
+  assert.deepEqual(view.components.map((component) => component.id), ["python.runtime", "python.lsp"]);
+  assert.equal(
+    view.requiredBySelection.some((id) => id.startsWith("javascript.")),
+    false,
+  );
+});

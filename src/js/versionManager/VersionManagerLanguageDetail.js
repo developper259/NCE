@@ -90,19 +90,41 @@ class VersionManagerLanguageDetail {
     const selection = manager.selectionFor(languageId) || new Set(view.selected || []);
     const list = VersionManagerUI.element("div", "nce-vm-component-list");
     for (const component of view.components) {
-      list.appendChild(VersionManagerLanguageDetail.componentRow(manager, languageId, component, selection, view.plan));
+      list.appendChild(VersionManagerLanguageDetail.componentRow(manager, languageId, component, selection, view.plan, view.requiredBySelection));
     }
     section.appendChild(list);
-    section.appendChild(VersionManagerLanguageDetail.planSummary(view.plan));
+    section.appendChild(VersionManagerLanguageDetail.planSummary(view.plan, view));
+    section.appendChild(VersionManagerLanguageDetail.progressSection(manager, languageId));
     return section;
   }
 
-  static componentRow(manager, languageId, component, selection, plan) {
+  /** Live progress for the components of this language, newest last. */
+  static progressSection(manager, languageId) {
+    const events = typeof manager.applyEventsFor === "function"
+      ? manager.applyEventsFor(languageId)
+      : [];
+    const box = VersionManagerUI.element("div", "nce-vm-lang-progress");
+    if (!events.length) return box;
+    for (const event of events.slice(-8)) {
+      const line = VersionManagerUI.element(
+        "div",
+        `nce-vm-lang-progress-line nce-vm-lang-progress-${event.state || "info"}`,
+      );
+      line.textContent = event.message || `${event.componentId} ${event.state || ""}`;
+      box.appendChild(line);
+    }
+    return box;
+  }
+
+  static componentRow(manager, languageId, component, selection, plan, requiredBySelection) {
+    const required = (requiredBySelection || []).includes(component.id);
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "nce-vm-component-checkbox";
-    checkbox.checked = selection.has(component.id);
-    checkbox.disabled = !component.supported;
+    // A dependency pulled in by a selected component is shown as required: it
+    // is part of the plan, but it is not the user's choice to make here.
+    checkbox.checked = selection.has(component.id) || required;
+    checkbox.disabled = !component.supported || required;
     checkbox.dataset.focusKey = `vm-component-${component.id}`;
     checkbox.addEventListener("change", () => {
       manager.toggleLanguageComponent(languageId, component.id, checkbox.checked);
@@ -110,13 +132,15 @@ class VersionManagerLanguageDetail {
 
     const metaParts = [`Version ${component.installableVersion}`];
     if (!component.supported) metaParts.push("Not available on this platform");
+    if (required) metaParts.push("Required by your selection");
 
-    // No "available" badge: the plan summary below the list already says what
-    // will be installed, so a badge on every pending component was pure noise.
-    // The "installed" badge stays, because it reports real state.
+    // A component is only "installed" when it really is. A dependency that is
+    // merely scheduled for installation is not installed yet, and saying so
+    // before anything was downloaded was actively misleading.
     let badge = null;
     if (plan) {
       if ((plan.unchanged || []).includes(component.id)) badge = VersionManagerUI.badge("installed");
+      else if ((plan.toInstall || []).includes(component.id)) badge = VersionManagerUI.badge("available");
       else if ((plan.toUninstall || []).includes(component.id)) badge = VersionManagerUI.badge("not-installed");
     }
 
@@ -128,15 +152,33 @@ class VersionManagerLanguageDetail {
     return row;
   }
 
-  static planSummary(plan) {
+  static planSummary(plan, view) {
     const box = VersionManagerUI.element("div", "nce-vm-lang-plan");
     const parts = [];
     if (plan?.toInstall?.length) parts.push(`Install ${plan.toInstall.length}`);
     if (plan?.toUninstall?.length) parts.push(`Uninstall ${plan.toUninstall.length}`);
     if (!parts.length) parts.push("Already up to date");
     box.appendChild(VersionManagerUI.element("span", "nce-vm-lang-plan-summary", parts.join(" · ")));
+    // Name what will be installed, so a dependency the user did not tick is
+    // never a surprise download.
+    const components = view?.components || [];
+    const names = (plan?.toInstall || [])
+      .map((id) => components.find((component) => component.id === id)?.name)
+      .filter(Boolean);
+    if (names.length)
+      box.appendChild(VersionManagerUI.element("span", "nce-vm-lang-plan-detail", `Will install: ${names.join(", ")}`));
     for (const blocker of plan?.blockers || []) {
       box.appendChild(VersionManagerUI.element("span", "nce-vm-lang-plan-blocker", blocker));
+    }
+    // Packages pulled in from outside this language must be announced, not
+    // discovered mid-download. Installing Pyright really does need Node.js.
+    for (const dependency of view?.packageDependencies || []) {
+      if (dependency.installed) continue;
+      box.appendChild(VersionManagerUI.element(
+        "span",
+        "nce-vm-lang-plan-dependency",
+        `${dependency.packageName} will also be installed: ${dependency.requiredBy} needs it.`,
+      ));
     }
     return box;
   }

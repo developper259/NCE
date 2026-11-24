@@ -18,6 +18,7 @@ class VersionManager {
     this.hideTimer = null;
     this.reloadSequence = 0;
     this.footerExtraActions = [];
+    this.applyEvents = [];
     this.onKeyDown = (event) => this.handleKeyDown(event);
   }
 
@@ -38,6 +39,13 @@ class VersionManager {
   get languageApplying() { return this.state.languageApplying; }
   set languageApplying(value) { this.state.languageApplying = value; }
   selectionFor(languageId) { return this.state.selectionFor(languageId); }
+  /** Recent component-operation events for a language, newest last. */
+  applyEventsFor(languageId) {
+    const view = this.state.languageViews.get(languageId);
+    if (!view) return [];
+    const ids = new Set((view.components || []).map((component) => component.id));
+    return this.applyEvents.filter((event) => ids.has(event.componentId));
+  }
   toggleLanguageComponent(languageId, componentId, checked) {
     this.state.toggleComponent(languageId, componentId, checked);
     this.refreshLanguageView(languageId);
@@ -245,6 +253,14 @@ class VersionManager {
       return;
     }
     if (event.type === "inventory-changed") this.reload();
+    if (event.type === "component-operation") {
+      // Component operations were broadcast by the main process but never
+      // handled here, so the language panel showed nothing while a plan ran and
+      // a dependency could start downloading unannounced.
+      this.applyEvents.push(event);
+      if (this.applyEvents.length > 50) this.applyEvents.shift();
+      this.renderMain();
+    }
   }
 
   async reload(rescan = false) {
@@ -328,11 +344,22 @@ class VersionManager {
 
   async applyLanguageComponents(languageId) {
     if (this.languageApplying || typeof this.api?.applyComponents !== "function") return;
+    // The selection must belong to the language being applied. A view that has
+    // not loaded yet has no selection entry, and falling back to whatever was
+    // stored for another language would apply the wrong plan: installing
+    // JavaScript components while the user was looking at Python.
     const selected = this.state.selectionFor(languageId);
+    if (!selected) {
+      this.state.confirmation = {
+        message: "This language is still loading. Try again in a moment.",
+      };
+      this.renderMain();
+      return;
+    }
     this.languageApplying = languageId;
     this.renderMain();
     try {
-      await this.api.applyComponents(languageId, selected ? [...selected] : []);
+      await this.api.applyComponents(languageId, [...selected]);
     } finally {
       this.languageApplying = null;
       await this.reload(true);

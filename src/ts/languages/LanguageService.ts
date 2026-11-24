@@ -8,6 +8,30 @@ export interface LanguageView extends LanguageInfo {
   plan: ComponentChangePlan;
   /** Ids currently checked in the UI (real state on first load). */
   selected: string[];
+  /**
+   * Components that will be installed because a selected component needs them,
+   * not because the user ticked them. The UI marks these as required instead of
+   * showing them as independently installed.
+   */
+  requiredBySelection: string[];
+  /**
+   * Packages that will be installed as dependencies of the selected components
+   * even though they are not components of this language themselves.
+   *
+   * Installing the Python language server pulls in Node.js, because Pyright is
+   * a JavaScript program. That is legitimate, but it must be announced: a
+   * JavaScript runtime appearing during a Python install is otherwise
+   * indistinguishable from a bug.
+   */
+  packageDependencies: PackageDependencyNotice[];
+}
+
+export interface PackageDependencyNotice {
+  packageId: string;
+  packageName: string;
+  /** Component of this language that needs it. */
+  requiredBy: string;
+  installed: boolean;
 }
 
 /**
@@ -58,7 +82,92 @@ export class LanguageService {
         installed: state,
         platform: this.platform,
       }),
+      requiredBySelection: this.requiredBySelection(language, selection, state),
+      packageDependencies: this.packageDependencies(language, selection, snapshot),
     };
+  }
+
+  /**
+   * Package-level dependencies of the selected components that are not
+   * components of this language.
+   *
+   * The component graph and the package graph are separate: `python.lsp`
+   * depends on `python.runtime` as a component, while the `pyright` package
+   * depends on the `node` package. Only the package graph knows about Node.js,
+   * so without this the Version Manager would download a JavaScript runtime
+   * during a Python install with no explanation.
+   */
+  private packageDependencies(
+    language: LanguageDefinition,
+    selection: string[],
+    snapshot: VersionManagerSnapshot,
+  ): PackageDependencyNotice[] {
+    const componentPackages = new Set(language.components.map((component) => component.packageId));
+    const installedPackages = new Set(
+      snapshot.packages
+        .filter((info) => info.state === "installed")
+        .map((info) => info.id),
+    );
+    const notices = new Map<string, PackageDependencyNotice>();
+
+    const visitPackage = (packageId: string, requiredBy: string, seen: Set<string>) => {
+      if (seen.has(packageId) || !this.packages.has(packageId)) return;
+      seen.add(packageId);
+      const definition = this.packages.get(packageId);
+      for (const dependencyId of definition.dependencies ?? []) {
+        if (!this.packages.has(dependencyId)) continue;
+        const dependency = this.packages.get(dependencyId);
+        // Only report packages that are not already part of this language: a
+        // component of the language is shown in its own row.
+        if (!componentPackages.has(dependencyId) && !notices.has(dependencyId)) {
+          notices.set(dependencyId, {
+            packageId: dependencyId,
+            packageName: dependency.name,
+            requiredBy,
+            installed: installedPackages.has(dependencyId),
+          });
+        }
+        visitPackage(dependencyId, requiredBy, seen);
+      }
+    };
+
+    for (const componentId of selection) {
+      const component = language.components.find((entry) => entry.id === componentId);
+      if (!component) continue;
+      visitPackage(component.packageId, component.name, new Set());
+    }
+    return [...notices.values()];
+  }
+
+  /**
+   * Selected components that are only in the plan because another selected
+   * component depends on them.
+   *
+   * Without this, a runtime pulled in as a dependency of a language server was
+   * indistinguishable from one the user ticked, and the UI reported it as
+   * already installed before anything had been downloaded.
+   */
+  private requiredBySelection(
+    language: LanguageDefinition,
+    selection: string[],
+    state: Map<string, ComponentInstallState>,
+  ): string[] {
+    const byId = new Map(language.components.map((component) => [component.id, component]));
+    const explicit = new Set(selection);
+    const required = new Set<string>();
+    const visit = (id: string, seen: Set<string>) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      for (const dependency of byId.get(id)?.dependencies ?? []) {
+        if (!byId.has(dependency)) continue;
+        // Only components that are not installed yet are worth flagging: an
+        // installed dependency is genuinely installed.
+        if ((state.get(dependency) ?? "not-installed") !== "installed") required.add(dependency);
+        visit(dependency, seen);
+      }
+    };
+    for (const id of explicit) visit(id, new Set());
+    return [...required].filter((id) => !explicit.has(id));
   }
 
   /** Raw declarative definition, for callers that need component metadata. */

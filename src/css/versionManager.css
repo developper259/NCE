@@ -622,6 +622,15 @@
 }
 .nce-vm-lang-plan-summary { color: var(--text-primary); font-size: 12px; font-weight: 600; }
 .nce-vm-lang-plan-blocker { color: var(--state-error); font-size: 12px; }
+.nce-vm-lang-plan-detail { color: var(--text-secondary); font-size: 12px; }
+.nce-vm-lang-plan-dependency { color: var(--text-secondary); font-size: 12px; font-style: italic; }
+.nce-vm-lang-progress { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.nce-vm-lang-progress-line { font-size: 12px; color: var(--text-secondary); }
+.nce-vm-lang-progress-running { color: var(--text-primary); }
+.nce-vm-lang-progress-completed { color: var(--state-success); }
+.nce-vm-lang-progress-failed { color: var(--state-error); }
+.nce-vm-lang-progress-cancelled { color: var(--text-secondary); }
+.nce-vm-lang-progress-skipped { color: var(--text-secondary); }
 
 @media (max-width: 720px) {
   .nce-vm-host { padding: 16px; }

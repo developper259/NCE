@@ -257,3 +257,111 @@ test("Git detail is unchanged: no component checkboxes appear for a plain packag
   assert.equal(checkboxes.length, 0);
   assert.ok(byFocusKey(document.body, "vm-back"));
 });
+
+test("applying a language never reuses another language's selection", async () => {
+  // Regression: a language whose view had not loaded yet fell back to an empty
+  // array, and the manager applied a plan that did not belong to the language
+  // the user was looking at. Python's panel could start installing JavaScript.
+  const { document, manager, calls } = setup({
+    languages: [{ id: "python", name: "Python" }, { id: "javascript", name: "JavaScript" }],
+    views: { python: languageView, javascript: javascriptLanguageView() },
+  });
+  await manager.show();
+  await flush();
+
+  // Select JavaScript components, then apply Python without its view loaded.
+  manager.state.componentSelection.set("javascript", new Set(["javascript.runtime", "javascript.lsp"]));
+  manager.state.componentSelection.delete("python");
+
+  manager.openDetail("python");
+  const apply = byFocusKey(document.body, "vm-apply-components-python");
+  apply.click();
+  await flush();
+
+  assert.equal(calls.apply.length, 0, "nothing may be applied without a real selection");
+  assert.ok(manager.state.confirmation, "the user is told the view is still loading");
+});
+
+test("applying a language sends only that language's selection", async () => {
+  const { document, manager, calls } = setup({
+    languages: [{ id: "python", name: "Python" }, { id: "javascript", name: "JavaScript" }],
+    views: { python: languageView, javascript: javascriptLanguageView() },
+  });
+  await manager.show();
+  await flush();
+
+  manager.state.componentSelection.set("javascript", new Set(["javascript.runtime"]));
+  manager.state.componentSelection.set("python", new Set(["python.lsp"]));
+
+  manager.openDetail("python");
+  byFocusKey(document.body, "vm-apply-components-python").click();
+  await flush();
+
+  assert.equal(calls.apply.length, 1);
+  assert.equal(calls.apply[0].languageId, "python");
+  assert.deepEqual(Array.from(calls.apply[0].selected), ["python.lsp"]);
+});
+
+test("a component scheduled for install is not badged as installed", async () => {
+  // Regression: the runtime showed as "Installed" before anything had been
+  // downloaded, because the badge only checked the unchanged list and the plan
+  // summary said nothing about what was about to be installed.
+  const { document, manager } = setup();
+  await manager.show();
+  await flush();
+  manager.openDetail("python");
+
+  const text = textOf(document.body);
+  const runtimeRow = walk(document.body, (node) =>
+    node.className && String(node.className).includes("nce-vm-component-row") &&
+    textOf(node).includes("Python Runtime"))[0];
+  assert.ok(runtimeRow, "the runtime row is rendered");
+  assert.equal(
+    textOf(runtimeRow).includes("Installed"),
+    false,
+    "a component that is only scheduled must not claim to be installed",
+  );
+  assert.ok(text.includes("Will install"), "the plan names what will be installed");
+});
+
+test("a dependency pulled in by a selection is marked as required", async () => {
+  const { document, manager } = setup({
+    views: {
+      python: {
+        ...languageView,
+        selected: ["python.lsp"],
+        requiredBySelection: ["python.runtime"],
+      },
+    },
+  });
+  await manager.show();
+  await flush();
+  manager.openDetail("python");
+
+  const text = textOf(document.body);
+  assert.ok(text.includes("Required by your selection"));
+});
+
+test("component operations are surfaced while a plan runs", async () => {
+  // Regression: component-operation events were broadcast but never handled, so
+  // a dependency could start downloading with no visible feedback.
+  let emit = null;
+  const { document, manager } = setup();
+  manager.api.onEvent = (callback) => { emit = callback; return () => {}; };
+  await manager.show();
+  await flush();
+  manager.subscribe?.();
+
+  assert.equal(typeof emit, "function");
+  emit({
+    type: "component-operation",
+    componentId: "python.runtime",
+    packageId: "python",
+    kind: "install",
+    state: "running",
+    message: "Installing Python Runtime…",
+  });
+  manager.openDetail("python");
+
+  assert.ok(textOf(document.body).includes("Installing Python Runtime"));
+});
