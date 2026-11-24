@@ -6,7 +6,10 @@ import {
   nativeTheme,
 } from "electron";
 import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
-import { TITLEBAR_OVERLAY_THEME } from "../manager/TitleBarTheme";
+import {
+  titleBarOverlayFor,
+  type ResolvedTheme,
+} from "../manager/TitleBarTheme";
 
 export type MenuPosition = {
   x: number;
@@ -40,10 +43,25 @@ function estimateMenuHeight(
 export class ContextMenu {
   window: BrowserWindow;
   private readonly ipc: IpcHandlerRegistrar;
+  /** Last theme the renderer reported, so the scrim toggle can re-apply it. */
+  private resolvedTheme: ResolvedTheme = "dark";
+  /** Surfaces currently showing a scrim; the overlay dims while non-empty. */
+  private readonly scrimOwners = new Set<string>();
 
   constructor(window: BrowserWindow, ipc: IpcHandlerRegistrar = ipcMain as any) {
     this.window = window;
     this.ipc = ipc;
+  }
+
+  /**
+   * The native overlay sits above the web contents, so a renderer scrim cannot
+   * darken it. The renderer reports when a modal scrim goes up or down and the
+   * overlay is repainted to match.
+   */
+  private applyTitleBarOverlay() {
+    this.window.setTitleBarOverlay?.(
+      titleBarOverlayFor(this.resolvedTheme, this.scrimOwners.size > 0),
+    );
   }
 
   handleIPC() {
@@ -54,9 +72,19 @@ export class ContextMenu {
         return false;
       }
       nativeTheme.themeSource = source;
-      const theme = resolvedTheme === "light" ? "light" : "dark";
-      this.window.setTitleBarOverlay?.(TITLEBAR_OVERLAY_THEME[theme]);
+      this.resolvedTheme = resolvedTheme === "light" ? "light" : "dark";
+      this.applyTitleBarOverlay();
       return true;
+      },
+    );
+    this.ipc.handle(
+      "Theme:setModalScrim",
+      (_event, owner: unknown, active: unknown) => {
+        if (typeof owner !== "string" || !owner) return false;
+        if (active === true) this.scrimOwners.add(owner);
+        else this.scrimOwners.delete(owner);
+        this.applyTitleBarOverlay();
+        return true;
       },
     );
     this.ipc.handle(

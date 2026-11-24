@@ -387,6 +387,8 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("ContextMenu:show", actions, position),
   setNativeThemeSource: (source, resolvedTheme) =>
     ipcRenderer.invoke("Theme:setNativeSource", source, resolvedTheme),
+  setModalScrim: (owner, active) =>
+    ipcRenderer.invoke("Theme:setModalScrim", owner, active === true),
 
   renameEntry: (oldPath, newPath) =>
     ipcRenderer.invoke("FileManager:rename", oldPath, newPath),

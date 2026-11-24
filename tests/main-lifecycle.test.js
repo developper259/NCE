@@ -167,6 +167,55 @@ test("native titlebar controls share the workbench background palette", async ()
   assert.equal(overlays.at(-1).color, darkColor);
 });
 
+test("native overlay dims with the modal scrim and restores afterwards", () => {
+  const { ContextMenu } = loadMain("dist/ts/addon/ContextMenu.js", {
+    electron: { nativeTheme: {} },
+  });
+  const overlays = [];
+  const handlers = new Map();
+  new ContextMenu(
+    { setTitleBarOverlay: (options) => overlays.push(options) },
+    { handle: (channel, handler) => handlers.set(channel, handler) },
+  ).handleIPC();
+  const setNativeSource = handlers.get("Theme:setNativeSource");
+  const setModalScrim = handlers.get("Theme:setModalScrim");
+  assert.equal(typeof setModalScrim, "function");
+
+  setNativeSource(null, "dark", "dark");
+  const baseColor = overlays.at(-1).color;
+
+  // A scrim owner dims the overlay; the OS-painted block must match the scrim.
+  assert.equal(setModalScrim(null, "version-manager", true), true);
+  const dimmedColor = overlays.at(-1).color;
+  assert.notEqual(dimmedColor, baseColor);
+  assert.ok(
+    Number.parseInt(dimmedColor.slice(1), 16) <
+      Number.parseInt(baseColor.slice(1), 16),
+    "dimmed overlay is darker than the base overlay",
+  );
+
+  // A second owner must not clear the dimming owned by the first.
+  assert.equal(setModalScrim(null, "performance-dashboard", true), true);
+  assert.equal(overlays.at(-1).color, dimmedColor);
+  assert.equal(setModalScrim(null, "version-manager", false), true);
+  assert.equal(overlays.at(-1).color, dimmedColor);
+  assert.equal(setModalScrim(null, "performance-dashboard", false), true);
+  assert.equal(overlays.at(-1).color, baseColor);
+
+  // A theme change while scrimmed keeps the dimmed variant.
+  setModalScrim(null, "version-manager", true);
+  setNativeSource(null, "light", "light");
+  const dimmedLight = overlays.at(-1).color;
+  assert.notEqual(dimmedLight, "#e7e9ed");
+  setModalScrim(null, "version-manager", false);
+  assert.equal(overlays.at(-1).color, "#e7e9ed");
+
+  // Malformed calls are rejected instead of corrupting the overlay state.
+  assert.equal(setModalScrim(null, "", true), false);
+  assert.equal(setModalScrim(null, 42, true), false);
+  assert.equal(overlays.at(-1).color, "#e7e9ed");
+});
+
 test("native application menu is kept only on macOS", () => {
   function exercise(platform) {
     const installed = [];

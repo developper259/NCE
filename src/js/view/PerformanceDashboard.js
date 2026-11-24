@@ -98,6 +98,7 @@ class PerformanceDashboard {
     this.previousFocus = document.activeElement;
     this.host.hidden = false;
     this.host.setAttribute("aria-hidden", "false");
+    this.editor.api?.setModalScrim?.("performance-dashboard", true);
     this.refresh();
     this.closeButton?.focus();
     return true;
@@ -107,6 +108,7 @@ class PerformanceDashboard {
     if (!this.host || this.host.hidden) return false;
     this.host.hidden = true;
     this.host.setAttribute("aria-hidden", "true");
+    this.editor.api?.setModalScrim?.("performance-dashboard", false);
     if (this.previousFocus?.isConnected && typeof this.previousFocus.focus === "function")
       this.previousFocus.focus();
     this.previousFocus = null;
