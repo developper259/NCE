@@ -130,3 +130,34 @@ test("synced Flaticon assets match the deterministic source-filtered build", () 
     }
   }
 });
+
+// Package and language definitions are the icons the Version Manager renders.
+// A class that does not exist in the font is collected, found missing from the
+// source CSS and silently dropped, so the icon renders as nothing at all.
+// "fi-brands-nodejs" shipped that way: the JavaScript package had no icon.
+test("package and language icons exist in the Flaticon font", () => {
+  const sourcePath = require.resolve("@flaticon/flaticon-uicons/css/all/all.css");
+  const sourceCss = fs.readFileSync(sourcePath, "utf8");
+  const declared = new Set(
+    [...sourceCss.matchAll(/\.(fi-[a-z0-9-]+):before/g)].map((match) => match[1]),
+  );
+
+  const definitionDirs = ["src/ts/packages", "src/ts/languages"];
+  const referenced = new Map();
+  for (const directory of definitionDirs) {
+    for (const entry of fs.readdirSync(path.join(root, directory))) {
+      if (path.extname(entry) !== ".ts") continue;
+      const contents = fs.readFileSync(path.join(root, directory, entry), "utf8");
+      for (const match of contents.matchAll(/icon:\s*"fi ([a-z0-9-]+)"/g)) {
+        referenced.set(match[1], `${directory}/${entry}`);
+      }
+    }
+  }
+
+  assert.ok(referenced.size >= 4, "the definitions declare their icons");
+  const missing = [...referenced]
+    .filter(([iconClass]) => !declared.has(iconClass))
+    .map(([iconClass, origin]) => `${iconClass} (${origin})`)
+    .sort();
+  assert.deepEqual(missing, [], `icons missing from the font: ${missing.join(", ")}`);
+});

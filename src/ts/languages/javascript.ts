@@ -12,7 +12,7 @@ export const javascript: LanguageDefinition = {
   name: "JavaScript",
   description: "JavaScript runtime and TypeScript language tooling for JavaScript projects.",
   categories: ["language"],
-  icon: "fi fi-brands-nodejs",
+  icon: "fi fi-brands-js",
   fileExtensions: [".js", ".jsx", ".mjs", ".cjs"],
   components: [
     {

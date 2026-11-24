@@ -13,7 +13,7 @@ export const node: ManagedPackageDefinition = {
   publisher: "Node.js Foundation",
   homepage: "https://nodejs.org",
   categories: ["language", "runtime"],
-  icon: "fi fi-brands-nodejs",
+  icon: "fi fi-brands-js",
   platforms: ["darwin", "win32"],
   capabilities: ["install", "uninstall", "verify"],
   installerPackageId: "node",
