@@ -10,15 +10,16 @@ export interface LspCommandCandidate {
  * Declarative launch description for a server that NCE installed itself.
  *
  * The entry point is relative to the package installation directory. When
- * `runtimePackageId` is set, the server is a script launched through that
- * runtime (for example `node lib/cli.mjs --stdio`) instead of a native binary.
+ * `runtimePackageId` is set, the server is a script rather than a native
+ * binary. The runtime itself is NCE's embedded Node.js, not an installable
+ * package; the field remains as a marker for inventory-change handling.
  */
 export interface ManagedServerExecution {
   /** Package that provides the server, as registered in the PackageRegistry. */
   packageId: string;
   /** Entry point relative to the installation directory. */
   entryPoint: string;
-  /** Package providing the runtime that launches `entryPoint`, when it is a script. */
+  /** Legacy marker: this entry point is a script launched by NCE's runtime. */
   runtimePackageId?: string;
   /** Arguments passed to the entry point. */
   args: string[];

@@ -17,7 +17,7 @@ export const typescript: ManagedPackageDefinition = {
   icon: "fi fi-brands-typescript",
   platforms: ["darwin", "win32", "linux"],
   capabilities: ["install", "uninstall", "verify"],
-  dependencies: ["node"],
+  dependencies: [],
   installerPackageId: "typescript",
   installableVersion: "5.9.3",
   installationRoot: "tools/typescript",

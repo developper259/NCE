@@ -10,7 +10,7 @@ export const pyright: ManagedPackageDefinition = {
   categories: ["language-server"],
   platforms: ["darwin", "win32", "linux"],
   capabilities: ["install", "uninstall", "verify"],
-  dependencies: ["node"],
+  dependencies: [],
   installerPackageId: "pyright",
   installableVersion: "1.1.414",
   installationRoot: "tools/pyright",

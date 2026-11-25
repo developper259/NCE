@@ -16,12 +16,8 @@ export interface LanguageView extends LanguageInfo {
   requiredBySelection: string[];
   /**
    * Packages that will be installed as dependencies of the selected components
-   * even though they are not components of this language themselves.
-   *
-   * Installing the Python language server pulls in Node.js, because Pyright is
-   * a JavaScript program. That is legitimate, but it must be announced: a
-   * JavaScript runtime appearing during a Python install is otherwise
-   * indistinguishable from a bug.
+   * even though they are not components of this language themselves. Node.js is
+   * no longer installable: NCE ships its own runtime for language servers.
    */
   packageDependencies: PackageDependencyNotice[];
 }
@@ -92,10 +88,9 @@ export class LanguageService {
    * components of this language.
    *
    * The component graph and the package graph are separate: `python.lsp`
-   * depends on `python.runtime` as a component, while the `pyright` package
-   * depends on the `node` package. Only the package graph knows about Node.js,
-   * so without this the Version Manager would download a JavaScript runtime
-   * during a Python install with no explanation.
+   * depends on `python.runtime` as a component, while package-level
+   * dependencies are declared on the packages themselves. This keeps any such
+   * extra download visible to the user.
    */
   private packageDependencies(
     language: LanguageDefinition,

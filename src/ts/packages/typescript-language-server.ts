@@ -10,7 +10,7 @@ export const typescriptLanguageServer: ManagedPackageDefinition = {
   categories: ["language-server"],
   platforms: ["darwin", "win32", "linux"],
   capabilities: ["install", "uninstall", "verify"],
-  dependencies: ["node", "typescript"],
+  dependencies: ["typescript"],
   installerPackageId: "typescript-language-server",
   installableVersion: "6.1.0",
   installationRoot: "tools/typescript-language-server",

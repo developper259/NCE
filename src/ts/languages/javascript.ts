@@ -3,15 +3,10 @@ import type { LanguageDefinition } from "./types";
 /**
  * JavaScript & TypeScript environment.
  *
- * JavaScript and TypeScript share exactly the same three components: the
- * JavaScript runtime (the Node.js distribution), the TypeScript compiler with
- * its tsserver backend, and the TypeScript language server. Two separate
- * language definitions listed the same components twice, so the Version
- * Manager showed two near-identical environments for one toolchain.
- *
- * They are now one language covering both extension families. The compiler and
- * the language server are optional components: a plain JavaScript project only
- * needs the runtime, while a TypeScript project selects all three.
+ * JavaScript and TypeScript share one language definition covering both
+ * extension families. The Node.js runtime used by NCE's language servers is
+ * shipped with the app, so it is no longer a component the user installs.
+ * The TypeScript compiler and language server remain installable components.
  */
 export const javascript: LanguageDefinition = {
   id: "javascript",
@@ -22,24 +17,12 @@ export const javascript: LanguageDefinition = {
   fileExtensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
   components: [
     {
-      id: "javascript.runtime",
-      name: "JavaScript Runtime",
-      description: "JavaScript runtime (Node.js) with npm and npx for running scripts and tools.",
-      type: "runtime",
-      packageId: "node",
-      platforms: ["darwin", "win32"],
-      capabilities: ["execute-scripts", "manage-packages"],
-      fileExtensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
-      defaultSelected: true,
-    },
-    {
       id: "javascript.typescript",
       name: "TypeScript Compiler",
       description: "Compiler and tsserver backend required by the language server.",
       type: "compiler",
       packageId: "typescript",
       platforms: ["darwin", "win32", "linux"],
-      dependencies: ["javascript.runtime"],
       fileExtensions: [".ts", ".tsx", ".mts", ".cts"],
       defaultSelected: true,
     },
@@ -57,5 +40,5 @@ export const javascript: LanguageDefinition = {
       defaultSelected: true,
     },
   ],
-  defaultSelection: ["javascript.runtime", "javascript.typescript", "javascript.lsp"],
+  defaultSelection: ["javascript.typescript", "javascript.lsp"],
 };

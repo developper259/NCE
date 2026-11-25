@@ -27,16 +27,19 @@ test("builtin Installer distributions validate for every declared platform", () 
   }
 });
 
-test("Node distribution uses official nodejs.org URLs and verified checksums", () => {
-  const node = builtinPackages.node;
-  assert.equal(node.version, "24.22.3");
-  const darwin = node.platforms.darwin.arm64;
-  assert.match(darwin.download.url, /^https:\/\/nodejs\.org\/dist\/v24\.22\.3\/node-v24\.22\.3-darwin-arm64\.tar\.gz$/);
-  assert.equal(darwin.download.checksum, "ff6e17d4874b76d272212b908cc020d6e815fba5a6c7eaaa06add725840307fd");
-  assert.equal(darwin.archive.stripComponents, 1);
-  assert.equal(node.platforms.win32.x64.download.checksum, "e612af99f626ab415ea225af6bce5c971feb448cb5cae250bb1c3fa50c5f7d9f");
-  // Linux is intentionally absent: official Node Linux archives are .tar.xz.
-  assert.equal(node.platforms.linux, undefined);
+test("Node.js is not an installable package: NCE ships its own runtime", () => {
+  assert.equal(builtinPackages.node, undefined);
+  assert.equal(
+    builtinManagedPackages.some((definition) => definition.id === "node"),
+    false,
+  );
+  for (const definition of builtinManagedPackages) {
+    assert.equal(
+      (definition.dependencies || []).includes("node"),
+      false,
+      `${definition.id} must not require a user-installed Node.js`,
+    );
+  }
 });
 
 test("npm tarballs use verified sha512 integrity and presence verification", () => {
@@ -55,8 +58,8 @@ test("managed packages and language definitions are consistent with the registry
   const packages = new PackageRegistry(builtinManagedPackages);
   const languages = new LanguageRegistry(builtinLanguages, packages);
 
-  // JavaScript and TypeScript are one environment: they share the same three
-  // components, so two definitions listed the same toolchain twice.
+  // JavaScript and TypeScript are one environment. The runtime NCE uses for
+  // its language servers is embedded in the app, not installed by the user.
   const js = languages.get("javascript");
   assert.equal(js.name, "JavaScript & TypeScript");
   assert.ok(js.fileExtensions.includes(".py") === false);
@@ -67,13 +70,17 @@ test("managed packages and language definitions are consistent with the registry
     assert.ok(packages.has(component.packageId), `${component.id} -> managed package ${component.packageId}`);
     assert.ok(builtinPackages[component.packageId], `${component.packageId} has an Installer distribution`);
   }
-  assert.deepEqual(js.defaultSelection, ["javascript.runtime", "javascript.typescript", "javascript.lsp"]);
+  assert.deepEqual(js.components.map((component) => component.id), [
+    "javascript.typescript",
+    "javascript.lsp",
+  ]);
+  assert.deepEqual(js.defaultSelection, ["javascript.typescript", "javascript.lsp"]);
 
   // The TypeScript environment no longer exists as a separate language.
   assert.equal(languages.has("typescript"), false);
 });
 
-test("selecting the JS LSP plans its runtime and compiler dependencies", () => {
+test("selecting the JS LSP plans only its compiler dependency", () => {
   const packages = new PackageRegistry(builtinManagedPackages);
   const languages = new LanguageRegistry(builtinLanguages, packages);
   const js = languages.get("javascript");
@@ -83,16 +90,12 @@ test("selecting the JS LSP plans its runtime and compiler dependencies", () => {
     installed: new Map(),
     platform: "darwin",
   });
-  assert.deepEqual(plan.toInstall, [
-    "javascript.runtime",
-    "javascript.typescript",
-    "javascript.lsp",
-  ]);
-  assert.deepEqual(plan.dependenciesToInstall.sort(), ["javascript.runtime", "javascript.typescript"]);
+  assert.deepEqual(plan.toInstall, ["javascript.typescript", "javascript.lsp"]);
+  assert.deepEqual(plan.dependenciesToInstall, ["javascript.typescript"]);
   assert.deepEqual(plan.blockers, []);
 });
 
-test("selecting the TypeScript compiler plans its runtime dependency", () => {
+test("selecting the TypeScript compiler needs no runtime component", () => {
   const packages = new PackageRegistry(builtinManagedPackages);
   const languages = new LanguageRegistry(builtinLanguages, packages);
   const js = languages.get("javascript");
@@ -102,8 +105,8 @@ test("selecting the TypeScript compiler plans its runtime dependency", () => {
     installed: new Map(),
     platform: "darwin",
   });
-  assert.deepEqual(plan.toInstall, ["javascript.runtime", "javascript.typescript"]);
-  assert.deepEqual(plan.dependenciesToInstall, ["javascript.runtime"]);
+  assert.deepEqual(plan.toInstall, ["javascript.typescript"]);
+  assert.deepEqual(plan.dependenciesToInstall, []);
   assert.deepEqual(plan.blockers, []);
 });
 
