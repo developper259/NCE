@@ -162,3 +162,33 @@ test("a real LSP speaks JSON-RPC over stdio through the internal runtime", async
     child.kill();
   }
 });
+
+test("an internal-runtime LSP child stops and restarts cleanly", async () => {
+  const binary = stagedBinary();
+  if (!fs.existsSync(binary)) return;
+  const script = path.join(root, "tests/helpers/fake-lsp-server.cjs");
+  const spawnChild = () => spawn(binary, [script, "typescript-language-server", "normal"], {
+    cwd: root,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+  const first = spawnChild();
+  const firstClient = jsonRpcClient(first);
+  await withTimeout(firstClient.request("initialize", {
+    processId: process.pid, rootUri: "file:///tmp", capabilities: {},
+  }), "first initialize");
+  first.kill();
+  await new Promise((resolve) => first.once("exit", resolve));
+
+  const second = spawnChild();
+  try {
+    const secondClient = jsonRpcClient(second);
+    const reply = await withTimeout(secondClient.request("initialize", {
+      processId: process.pid, rootUri: "file:///tmp", capabilities: {},
+    }), "second initialize");
+    assert.ok(reply.result.capabilities);
+  } finally {
+    second.kill();
+  }
+});

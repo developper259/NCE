@@ -23,14 +23,19 @@ export interface InternalNodeRuntimeInfo {
 }
 
 export interface InternalNodeRuntimeOptions {
-  /** Override for tests. Defaults to `process.resourcesPath` in Electron. */
+  /** Override for tests. Takes precedence over every other path option. */
   resourcesPath?: string;
+  /**
+   * Application root. In development the binary is staged next to the source
+   * (`<root>/resources`), not inside Electron's own dist resources.
+   */
+  appPath?: string;
+  /** Whether the app is packaged. Provided by the Electron main process. */
+  isPackaged?: boolean;
   /** Override for tests. Defaults to the pinned version. */
   version?: string;
   /** Override for tests. Defaults to `process.platform`. */
   platform?: NodeJS.Platform;
-  /** Override for tests. Defaults to `process.cwd()`. */
-  cwd?: string;
 }
 
 /** Pinned version. Keep in sync with scripts/internal-node-config.cjs. */
@@ -44,8 +49,14 @@ function executableName(platform: NodeJS.Platform): string {
 function resourcesRoot(options: InternalNodeRuntimeOptions): string | null {
   if (options.resourcesPath) return options.resourcesPath;
   const electronResources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-  if (typeof electronResources === "string" && electronResources) return electronResources;
-  return null;
+  // In a packaged app the runtime is copied by extraResources into
+  // process.resourcesPath. In development it is staged at <appPath>/resources
+  // by the build script, while process.resourcesPath points inside Electron's
+  // own dist folder. Using the latter in dev would never find the binary.
+  if (options.isPackaged === false || !electronResources) {
+    return options.appPath ? path.join(options.appPath, "resources") : null;
+  }
+  return electronResources;
 }
 
 /**
@@ -87,11 +98,12 @@ export async function resolveInternalNodeRuntime(
     throw new Error(`The internal Node.js runtime is not executable: ${executable}.`);
   }
 
-  const packaged = typeof (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath === "string";
   return {
     executable,
     version,
-    source: packaged ? "packaged" : "development",
+    source: options.isPackaged === false || options.resourcesPath
+      ? "development"
+      : "packaged",
   };
 }
 

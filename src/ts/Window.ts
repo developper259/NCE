@@ -270,7 +270,12 @@ export class Window {
       // The Version Manager owns the installation inventory at application
       // level; the LSP engine only reads it through this narrow resolver.
       managedTools: this.app.versionManager?.managedTools ?? null,
-      internalRuntime: { resolve: () => resolveInternalNodeRuntime() },
+      internalRuntime: {
+        resolve: () => resolveInternalNodeRuntime({
+          isPackaged: app.isPackaged,
+          appPath: app.getAppPath(),
+        }),
+      },
       send: (channel, payload) => {
         const target = this.window;
         if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;

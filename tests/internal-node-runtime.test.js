@@ -64,6 +64,44 @@ test("runtime resolution rejects a non-executable binary on POSIX", async () => 
   }
 });
 
+test("runtime resolution handles resource paths with spaces and special characters", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "nce runtime [test] "));
+  try {
+    const dir = path.join(base, config.RESOURCE_DIR, config.VERSION);
+    fs.mkdirSync(dir, { recursive: true });
+    const binary = path.join(dir, process.platform === "win32" ? "node.exe" : "node");
+    fs.writeFileSync(binary, "stub");
+    fs.chmodSync(binary, 0o755);
+    const info = await resolveInternalNodeRuntime({ resourcesPath: base });
+    assert.equal(info.executable, binary);
+    assert.equal(info.source, "development");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("development resolves the binary next to the app, packaged uses resourcesPath", async () => {
+  const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nce-app-root-"));
+  try {
+    const dir = path.join(appRoot, "resources", config.RESOURCE_DIR, config.VERSION);
+    fs.mkdirSync(dir, { recursive: true });
+    const binary = path.join(dir, process.platform === "win32" ? "node.exe" : "node");
+    fs.writeFileSync(binary, "stub");
+    fs.chmodSync(binary, 0o755);
+
+    const dev = await resolveInternalNodeRuntime({ appPath: appRoot, isPackaged: false });
+    assert.equal(dev.executable, binary);
+    assert.equal(dev.source, "development");
+
+    await assert.rejects(
+      resolveInternalNodeRuntime({ appPath: appRoot, isPackaged: true, resourcesPath: "/nonexistent" }),
+      /does not exist/,
+    );
+  } finally {
+    fs.rmSync(appRoot, { recursive: true, force: true });
+  }
+});
+
 test("runtime path stays inside resources and never consults PATH", () => {
   const resources = "/opt/nce/resources";
   const expected = path.join(
