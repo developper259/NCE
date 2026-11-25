@@ -42,8 +42,8 @@ function fakeOperations(overrides = {}) {
     installationIdFor(packageId) {
       return installations.get(packageId) ?? overrides.installationIdFor?.(packageId) ?? null;
     },
-    cancel() {
-      calls.push(["cancel"]);
+    cancel(packageId) {
+      calls.push(["cancel", packageId]);
       return true;
     },
   };
@@ -148,7 +148,46 @@ test("cancellation stops the plan and is reported", async () => {
   });
   assert.equal(result.success, false);
   assert.equal(result.cancelled, true);
-  assert.deepEqual(operations.calls, [["install", "pkg-a"]]);
+  assert.ok(
+    operations.calls.some(([kind, packageId]) => kind === "cancel" && packageId === "pkg-a"),
+    "the running package install must be cancelled",
+  );
+  assert.equal(
+    operations.calls.filter(([kind]) => kind === "install").length,
+    1,
+    "no further component may be installed after cancellation",
+  );
+});
+
+test("cancelling during an install cancels the underlying package operation", async () => {
+  let installStarted;
+  const started = new Promise((resolve) => { installStarted = resolve; });
+  const operations = fakeOperations({
+    install: () => {
+      installStarted();
+      return new Promise((resolve) => setTimeout(() => resolve({ success: true }), 200));
+    },
+  });
+  const orchestrator = new ComponentOrchestrator();
+  const applyPromise = orchestrator.apply({
+    plan: plan(["a", "b"]),
+    components: components("a", "b"),
+    operations,
+  });
+  // Cancel only once the first install is genuinely in flight.
+  await started;
+  assert.equal(orchestrator.cancel(), true);
+  const result = await applyPromise;
+  assert.equal(result.cancelled, true);
+  assert.ok(
+    operations.calls.some(([kind, packageId]) => kind === "cancel" && packageId === "pkg-a"),
+    "the running package install must be cancelled, not just the plan loop",
+  );
+  assert.equal(
+    operations.calls.some(([kind, packageId]) => kind === "install" && packageId === "pkg-b"),
+    false,
+    "no further component may be installed after cancellation",
+  );
 });
 
 test("blockers prevent any operation", async () => {

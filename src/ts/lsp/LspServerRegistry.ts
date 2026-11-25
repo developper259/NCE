@@ -21,6 +21,12 @@ export interface ManagedServerExecution {
   entryPoint: string;
   /** Legacy marker: this entry point is a script launched by NCE's runtime. */
   runtimePackageId?: string;
+  /**
+   * Other managed packages this server needs at runtime. A change to one of
+   * them invalidates the session even though the server's own package did not
+   * change (e.g. typescript-language-server needs the TypeScript SDK).
+   */
+  dependencyPackageIds?: string[];
   /** Arguments passed to the entry point. */
   args: string[];
   /**
@@ -62,6 +68,7 @@ const SERVER_DEFINITIONS: LspServerDefinition[] = [
       packageId: "typescript-language-server",
       entryPoint: "lib/cli.mjs",
       runtimePackageId: "node",
+      dependencyPackageIds: ["typescript"],
       args: ["--stdio"],
       // typescript-language-server resolves tsserver.js from a sibling
       // node_modules/typescript/lib, which does not exist here: NCE installs

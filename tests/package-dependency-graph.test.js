@@ -34,6 +34,18 @@ test("the real catalog declares no dependency on an installable Node.js", () => 
   }
 });
 
+test("a dependency declared by a language component blocks removal too", () => {
+  const graphWithComponents = new PackageDependencyGraph({
+    registry: new PackageRegistry(FIXTURES),
+    installedPackageIds: () => ["runtime", "compiler"],
+    componentDependencies: () => [{ packageId: "compiler", dependsOnPackageId: "runtime" }],
+  });
+  const check = graphWithComponents.checkRemoval("runtime");
+  assert.equal(check.allowed, false);
+  assert.deepEqual(check.requiredBy.map((blocker) => blocker.packageId), ["compiler"]);
+  assert.match(check.reason, /still required by Compiler/);
+});
+
 test("an installed dependent blocks removal of its runtime", () => {
   const check = graph(["runtime", "other"]).checkRemoval("runtime");
   assert.equal(check.allowed, false);

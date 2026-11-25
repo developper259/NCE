@@ -14,6 +14,7 @@ import {
   languageIdForPath,
   resolveServerRoot,
   serversForLanguage,
+  normalizeServerId,
   SERVER_ID_ALIASES,
   type LspServerDefinition,
 } from "./LspServerRegistry";
@@ -705,8 +706,13 @@ export class LspManager {
   async restartServer(payload: unknown): Promise<LspEmptyResult> {
     try {
       const input = asObject(payload);
-      const serverId = input?.serverId;
-      if (typeof serverId !== "string" || !getServerDefinition(serverId))
+      const requestedId = input?.serverId;
+      if (typeof requestedId !== "string")
+        throw new LspManagerError("LSP_INVALID_ARGUMENT", "Unknown language server.");
+      // Legacy ids such as `basedpyright` are accepted elsewhere in settings;
+      // restartServer must normalize them too or it rejects a valid server.
+      const serverId = normalizeServerId(requestedId);
+      if (!getServerDefinition(serverId))
         throw new LspManagerError("LSP_INVALID_ARGUMENT", "Unknown language server.");
       for (const [key, attempt] of this.attempts) {
         if (attempt.serverId === serverId) this.attempts.delete(key);
@@ -970,7 +976,8 @@ export class LspManager {
         const spec = definition.managed;
         if (!spec) return false;
         return changed.has(spec.packageId)
-          || (spec.runtimePackageId ? changed.has(spec.runtimePackageId) : false);
+          || (spec.runtimePackageId ? changed.has(spec.runtimePackageId) : false)
+          || (spec.dependencyPackageIds ?? []).some((id) => changed.has(id));
       })
       : [];
 
@@ -1020,7 +1027,11 @@ export class LspManager {
         this.sessionSources.delete(key);
         this.attempts.delete(key);
         this.pending.delete(key);
-        this.associations.delete(key);
+        // Associations are indexed by document path, each holding a set of
+        // session keys. Deleting by session key was a no-op, so healthy
+        // documents stayed associated with a stopped session and were never
+        // re-attached after a managed package change.
+        this.forgetAssociations(key);
         // Diagnostics are stored under the session key (`serverId::root`), not
         // the bare server id: clearing by server id removed nothing, which is
         // why an uninstalled server's problems stayed in the Problems panel.
@@ -1090,7 +1101,15 @@ export class LspManager {
     if (!managed) return true;
     try {
       const resolution = await managed.resolve(spec.packageId, spec.entryPoint);
-      return resolution.available;
+      if (!resolution.available) return false;
+      // A runtime dependency can disappear while the server binary itself is
+      // still present. The TypeScript SDK is the concrete case: its path was
+      // injected at initialize time and cannot be changed afterwards.
+      for (const dependencyId of spec.dependencyPackageIds ?? []) {
+        const dependency = await managed.resolve(dependencyId);
+        if (!dependency.available) return false;
+      }
+      return true;
     } catch {
       return true;
     }

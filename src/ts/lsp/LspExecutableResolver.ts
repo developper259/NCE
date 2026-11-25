@@ -188,7 +188,10 @@ export async function resolveServerExecutable(
     ? configuration.args.filter((value): value is string => typeof value === "string")
     : null;
 
-  if (definition.requiresConfiguration && !configuredPath && !configuredArgs) {
+  // An explicit absolute path is mandatory for these servers. Supplying only
+  // `args` must not let the resolver fall through to a PATH lookup with
+  // arbitrary arguments.
+  if (definition.requiresConfiguration && !configuredPath) {
     return {
       available: false,
       command: null,

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { runCommand } from "../installer/command";
 import type { Installer } from "../installer/Installer";
+import { builtinLanguages } from "../languages/index";
 import type {
   InstallResult,
   InstallerArchitecture,
@@ -29,7 +30,11 @@ import type {
   VersionManagerEvent,
   VersionManagerSnapshot,
 } from "./types";
-import { PackageDependencyGraph, type RemovalCheck } from "./PackageDependencyGraph";
+import {
+  PackageDependencyGraph,
+  type ComponentDependencyEdge,
+  type RemovalCheck,
+} from "./PackageDependencyGraph";
 
 const MAX_RECENT_OPERATIONS = 20;
 const EXTERNAL_VERSION_TIMEOUT_MS = 10_000;
@@ -208,6 +213,24 @@ export class PackageManager {
         .listByPackage(packageId)
         .filter((record) => record.state === "installed")
         .map((record) => record.version),
+      componentDependencies: () => {
+        const edges: ComponentDependencyEdge[] = [];
+        for (const language of builtinLanguages) {
+          const byComponentId = new Map(language.components.map((component) => [component.id, component]));
+          for (const component of language.components) {
+            for (const dependencyId of component.dependencies ?? []) {
+              const dependency = byComponentId.get(dependencyId);
+              if (dependency) {
+                edges.push({
+                  packageId: component.packageId,
+                  dependsOnPackageId: dependency.packageId,
+                });
+              }
+            }
+          }
+        }
+        return edges;
+      },
     });
   }
 
@@ -330,8 +353,18 @@ export class PackageManager {
       verifiedAt: this.now(),
       error,
     });
-    this.finishOperation(operation, "completed");
+    // A failed verification must not be reported as a successful operation:
+    // callers (notably the component orchestrator) use this flag to decide
+    // whether it is safe to uninstall the components this one replaces.
+    this.finishOperation(
+      operation,
+      outcome.success ? "completed" : "failed",
+      outcome.success ? undefined : { code: outcome.code, message: outcome.error },
+    );
     this.emitInventoryChanged(record.packageId);
+    if (!outcome.success) {
+      return { success: false, code: outcome.code, error: outcome.error };
+    }
     return { success: true, installation: updated ?? { ...record, state, version, error } };
   }
 

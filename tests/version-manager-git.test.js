@@ -185,9 +185,10 @@ test("verify reads the real version and flags a corrupted Git installation", { s
 
     await fs.rm(planted.executable);
     const corrupted = await manager.verify(record.id);
-    assert.equal(corrupted.success, true);
-    assert.equal(corrupted.installation.state, "corrupted");
-    assert.equal(corrupted.installation.error.code, "VERIFICATION_FAILED");
+    // A failed verification is a failed operation: callers must not treat it
+    // as a green light to uninstall the components this one replaces.
+    assert.equal(corrupted.success, false);
+    assert.equal(corrupted.code, "VERIFICATION_FAILED");
     assert.equal(manager.getState().packages.find((entry) => entry.id === "git").state, "corrupted");
   } finally {
     await removeAll(root);

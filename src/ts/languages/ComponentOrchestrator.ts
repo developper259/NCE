@@ -55,6 +55,8 @@ export interface ApplyPlanOptions {
 export class ComponentOrchestrator {
   private active = false;
   private controller: AbortController | null = null;
+  private operations: ComponentOperations | null = null;
+  private currentPackageId: string | null = null;
 
   get busy(): boolean {
     return this.active;
@@ -63,6 +65,11 @@ export class ComponentOrchestrator {
   cancel(): boolean {
     if (!this.active || !this.controller) return false;
     this.controller.abort();
+    // Aborting the plan only stops the loop between steps. The underlying
+    // package operation is the one actually downloading/writing, so it must
+    // be cancelled too or it keeps running and changes the inventory after
+    // the plan has been reported as cancelled.
+    if (this.currentPackageId) this.operations?.cancel(this.currentPackageId);
     return true;
   }
 
@@ -78,7 +85,9 @@ export class ComponentOrchestrator {
     }
     this.active = true;
     this.controller = new AbortController();
-    const externalAbort = () => this.controller?.abort();
+    this.operations = options.operations;
+    this.currentPackageId = null;
+    const externalAbort = () => this.cancel();
     options.signal?.addEventListener("abort", externalAbort, { once: true });
 
     const events: ComponentOperationEvent[] = [];
@@ -104,7 +113,9 @@ export class ComponentOrchestrator {
         const component = options.components.get(id);
         if (!component) continue;
         emit(this.event(id, component.packageId, "install", "running", `Installing ${component.name}…`));
+        this.currentPackageId = component.packageId;
         const result = await options.operations.install(component.packageId);
+        this.currentPackageId = null;
         if (result.success) {
           completed.push(id);
           emit(this.event(id, component.packageId, "install", "completed", `${component.name} installed.`));
@@ -126,7 +137,9 @@ export class ComponentOrchestrator {
         const installationId = options.operations.installationIdFor(component.packageId);
         if (!installationId) continue;
         emit(this.event(id, component.packageId, "verify", "running", `Verifying ${component.name}…`));
+        this.currentPackageId = component.packageId;
         const result = await options.operations.verify(installationId);
+        this.currentPackageId = null;
         if (result.success) {
           emit(this.event(id, component.packageId, "verify", "completed", `${component.name} verified.`));
         } else {
@@ -147,7 +160,9 @@ export class ComponentOrchestrator {
           continue;
         }
         emit(this.event(id, component.packageId, "uninstall", "running", `Uninstalling ${component.name}…`));
+        this.currentPackageId = component.packageId;
         const result = await options.operations.uninstall(installationId);
+        this.currentPackageId = null;
         if (result.success) {
           completed.push(id);
           emit(this.event(id, component.packageId, "uninstall", "completed", `${component.name} uninstalled.`));
@@ -170,6 +185,8 @@ export class ComponentOrchestrator {
     } finally {
       options.signal?.removeEventListener("abort", externalAbort);
       this.controller = null;
+      this.operations = null;
+      this.currentPackageId = null;
       this.active = false;
     }
   }

@@ -18,12 +18,26 @@ export interface RemovalCheck {
   reason: string | null;
 }
 
+/** A dependency declared by a language component rather than by a package. */
+export interface ComponentDependencyEdge {
+  /** Package id of the component that needs another one. */
+  packageId: string;
+  /** Package id the component depends on. */
+  dependsOnPackageId: string;
+}
+
 export interface DependencyGraphOptions {
   registry: PackageRegistry;
   /** Package ids that currently have a usable installation. */
   installedPackageIds: () => Iterable<string>;
   /** Installed versions of a package, newest first, for the explanation. */
   installedVersions?: (packageId: string) => string[];
+  /**
+   * Edges declared by language components. A language environment can require
+   * a package (e.g. Python's LSP needs the Python runtime) without the package
+   * definitions themselves knowing about each other.
+   */
+  componentDependencies?: () => Iterable<ComponentDependencyEdge>;
 }
 
 /**
@@ -42,17 +56,28 @@ export class PackageDependencyGraph {
   private readonly registry: PackageRegistry;
   private readonly installedPackageIds: () => Iterable<string>;
   private readonly installedVersions: (packageId: string) => string[];
+  private readonly componentDependencies: () => Iterable<ComponentDependencyEdge>;
 
   constructor(options: DependencyGraphOptions) {
     this.registry = options.registry;
     this.installedPackageIds = options.installedPackageIds;
     this.installedVersions = options.installedVersions ?? (() => []);
+    this.componentDependencies = options.componentDependencies ?? (() => []);
   }
 
-  /** Direct dependents of a package, declared in the catalog. */
+  /** Direct dependents of a package, from both the catalog and language components. */
   directDependents(packageId: string): ManagedPackageDefinition[] {
-    return this.registry.list().filter((definition) =>
-      (definition.dependencies ?? []).includes(packageId));
+    const ids = new Set(
+      this.registry.list()
+        .filter((definition) => (definition.dependencies ?? []).includes(packageId))
+        .map((definition) => definition.id),
+    );
+    for (const edge of this.componentDependencies()) {
+      if (edge.dependsOnPackageId === packageId && this.registry.has(edge.packageId)) {
+        ids.add(edge.packageId);
+      }
+    }
+    return [...ids].map((id) => this.registry.get(id));
   }
 
   /** Every package that transitively needs `packageId`. */

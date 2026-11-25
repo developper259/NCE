@@ -254,6 +254,52 @@ test("an inventory refresh with no package ids keeps healthy managed sessions", 
   }
 });
 
+test("a missing TypeScript SDK stops the language server that depends on it", { timeout: 40_000 }, async () => {
+  const workspace = await createWorkspace();
+  const managed = inventoryPort(managedEntries());
+  const { manager } = await openManagedSession(workspace, managed);
+  try {
+    // The server binary is still there, but the SDK whose path was injected at
+    // initialize time is gone. The session must not stay ready against it.
+    delete managed.state.entries.typescript;
+    await manager.handleManagedPackagesChanged(["typescript"]);
+
+    const status = await manager.getStatus();
+    assert.equal(status.success, true);
+    assert.equal(
+      status.sessions.some((session) => session.serverId === "typescript-language-server"),
+      false,
+      "a session pointing at a missing SDK must be stopped",
+    );
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("a managed server re-confirmed by an inventory change re-attaches its open document", { timeout: 40_000 }, async () => {
+  const workspace = await createWorkspace();
+  const managed = inventoryPort(managedEntries());
+  const { manager } = await openManagedSession(workspace, managed);
+  try {
+    // The package is still installed: a verify or refresh reports it again.
+    // The session is restarted, and the open document must follow it.
+    await manager.handleManagedPackagesChanged(["typescript-language-server"]);
+
+    const ready = await waitFor(async () => {
+      const status = await manager.getStatus();
+      const session = status.sessions.find((entry) => entry.serverId === "typescript-language-server");
+      return status.success && session?.state === "ready" && session.documents === 1 && status;
+    });
+    assert.equal(ready.sessions.length, 1);
+    const session = ready.sessions[0];
+    assert.equal(session.documents, 1, "the open document must re-attach to the restarted server");
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("a session launched from a configured path survives an inventory change", { timeout: 40_000 }, async () => {
   const workspace = await createWorkspace();
   const documentPath = await fs.realpath(path.join(workspace, "main.ts"));
