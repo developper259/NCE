@@ -20,3 +20,6 @@ dataset.json
 /.benchmark-data/
 .benchmark-data
 /benchmark/
+
+# Node.js runtime staged at build time (downloaded, never committed)
+/resources/internal-node/
