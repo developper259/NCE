@@ -79,13 +79,19 @@ const TYPESCRIPT = {
 
 const EMPTY_ENV = { PATH: "" };
 
-test("Pyright launches through the managed Node.js runtime", async () => {
+/** Standalone runtime stub: no PATH lookup, no managed `node` package. */
+const internalRuntimePort = {
+  resolve: async () => ({ executable: NODE.executable, version: NODE.version }),
+};
+
+test("Pyright launches through the internal Node.js runtime", async () => {
   const resolution = await resolveServerExecutable({
     definition: getServerDefinition("pyright"),
     configuration: undefined,
     env: EMPTY_ENV,
     platform: "darwin",
-    managed: managedPort({ node: NODE, pyright: PYRIGHT }),
+    managed: managedPort({ pyright: PYRIGHT }),
+    internalRuntime: internalRuntimePort,
   });
 
   assert.equal(resolution.available, true);
@@ -94,13 +100,14 @@ test("Pyright launches through the managed Node.js runtime", async () => {
   assert.deepEqual(resolution.args, [PYRIGHT.executable, "--stdio"]);
 });
 
-test("TypeScript Language Server launches through managed Node.js with tsserver.path", async () => {
+test("TypeScript Language Server launches through the internal Node.js runtime with tsserver.path", async () => {
   const resolution = await resolveServerExecutable({
     definition: getServerDefinition("typescript-language-server"),
     configuration: undefined,
     env: EMPTY_ENV,
     platform: "darwin",
-    managed: managedPort({ node: NODE, "typescript-language-server": TLS, typescript: TYPESCRIPT }),
+    managed: managedPort({ "typescript-language-server": TLS, typescript: TYPESCRIPT }),
+    internalRuntime: internalRuntimePort,
   });
 
   assert.equal(resolution.available, true);
@@ -140,10 +147,12 @@ test("a Windows tsserver path survives placeholder expansion", async () => {
     env: EMPTY_ENV,
     platform: "win32",
     managed: managedPort({
-      node: WINDOWS_NODE,
       "typescript-language-server": WINDOWS_TLS,
       typescript: WINDOWS_TYPESCRIPT,
     }),
+    internalRuntime: {
+      resolve: async () => ({ executable: WINDOWS_NODE.executable, version: WINDOWS_NODE.version }),
+    },
   });
 
   assert.equal(resolution.available, true, resolution.error || undefined);
@@ -169,14 +178,15 @@ test("a missing TypeScript SDK is an explicit failure, not a silent launch", asy
     configuration: undefined,
     env: EMPTY_ENV,
     platform: "darwin",
-    managed: managedPort({ node: NODE, "typescript-language-server": TLS }),
+    managed: managedPort({ "typescript-language-server": TLS }),
+    internalRuntime: internalRuntimePort,
   });
 
   assert.equal(resolution.available, false);
   assert.match(resolution.error, /TypeScript SDK could not be resolved/);
 });
 
-test("a missing runtime is an explicit failure", async () => {
+test("a missing internal runtime is an explicit failure", async () => {
   const resolution = await resolveServerExecutable({
     definition: getServerDefinition("pyright"),
     configuration: undefined,
@@ -186,7 +196,23 @@ test("a missing runtime is an explicit failure", async () => {
   });
 
   assert.equal(resolution.available, false);
-  assert.match(resolution.error, /needs node/);
+  assert.match(resolution.error, /internal Node\.js runtime/);
+});
+
+test("a failing internal runtime is reported, never replaced by PATH Node", async () => {
+  const resolution = await resolveServerExecutable({
+    definition: getServerDefinition("pyright"),
+    configuration: undefined,
+    env: { PATH: "/usr/bin:/bin" },
+    platform: "darwin",
+    managed: managedPort({ pyright: PYRIGHT }),
+    internalRuntime: {
+      resolve: async () => { throw new Error("runtime binary is missing"); },
+    },
+  });
+
+  assert.equal(resolution.available, false);
+  assert.match(resolution.error, /runtime binary is missing/);
 });
 
 test("a configured absolute path always wins over a managed installation", async () => {
@@ -195,7 +221,8 @@ test("a configured absolute path always wins over a managed installation", async
     configuration: { path: process.execPath },
     env: EMPTY_ENV,
     platform: process.platform,
-    managed: managedPort({ node: NODE, pyright: PYRIGHT }),
+    managed: managedPort({ pyright: PYRIGHT }),
+    internalRuntime: internalRuntimePort,
   });
 
   assert.equal(resolution.available, true);
@@ -209,7 +236,8 @@ test("a managed installation wins over PATH discovery", async () => {
     configuration: undefined,
     env: { PATH: "/usr/bin:/bin" },
     platform: process.platform,
-    managed: managedPort({ node: NODE, pyright: PYRIGHT }),
+    managed: managedPort({ pyright: PYRIGHT }),
+    internalRuntime: internalRuntimePort,
   });
 
   assert.equal(resolution.source, "managed");
@@ -236,9 +264,9 @@ test("a corrupted managed install does not silently fall back to PATH", async ()
     env: EMPTY_ENV,
     platform: "darwin",
     managed: managedPort({
-      node: NODE,
       pyright: { ...PYRIGHT, missingEntry: true },
     }),
+    internalRuntime: internalRuntimePort,
   });
 
   assert.equal(resolution.available, false);
@@ -251,7 +279,8 @@ test("servers without a managed spec keep the historical PATH behaviour", async 
     configuration: undefined,
     env: EMPTY_ENV,
     platform: "darwin",
-    managed: managedPort({ node: NODE }),
+    managed: managedPort({}),
+    internalRuntime: internalRuntimePort,
   });
 
   assert.equal(resolution.available, false);

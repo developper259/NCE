@@ -5,7 +5,7 @@ import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 import type { PathAccess } from "../manager/PathAccess";
 import { LspDiagnosticsStore } from "./LspDiagnosticsStore";
 import { LspDocumentStore, type LspOpenDocument } from "./LspDocumentStore";
-import { resolveServerExecutable, type LspExecutableResolution, type ManagedToolPort } from "./LspExecutableResolver";
+import { resolveServerExecutable, type LspExecutableResolution, type ManagedToolPort, type InternalRuntimePort } from "./LspExecutableResolver";
 import { LspFeatureRouter, type LspRoute } from "./LspFeatureRouter";
 import { LspSession, type LspSessionState } from "./LspSession";
 import {
@@ -85,6 +85,8 @@ export interface LspManagerOptions {
   maxDocumentBytes?: number;
   /** Resolves executables NCE installed itself; absent means PATH-only resolution. */
   managedTools?: ManagedToolPort | null;
+  /** Standalone Node.js runtime for managed script servers. */
+  internalRuntime?: InternalRuntimePort | null;
   onLog?: (serverId: string, level: "info" | "warn" | "error", message: string) => void;
 }
 
@@ -915,6 +917,7 @@ export class LspManager {
         env: this.options.env ?? process.env,
         platform: this.options.platform ?? process.platform,
         managed: this.options.managedTools ?? null,
+        internalRuntime: this.options.internalRuntime ?? null,
       });
       this.resolutions.set(key, resolution);
     }

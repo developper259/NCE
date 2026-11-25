@@ -19,6 +19,7 @@ import { AgentApprovalManager } from "./addon/AgentApprovalManager";
 import { AgentProcessRunner } from "./addon/AgentProcessRunner";
 import { TerminalManager } from "./terminal/TerminalManager";
 import { normalizeTerminalLink } from "./terminal/TerminalTypes";
+import { resolveInternalNodeRuntime } from "./runtime/InternalNodeRuntime";
 import { App } from "./App";
 import type { IpcHandlerRegistrar } from "./manager/IpcRouter";
 import { PathAccess } from "./manager/PathAccess";
@@ -269,6 +270,7 @@ export class Window {
       // The Version Manager owns the installation inventory at application
       // level; the LSP engine only reads it through this narrow resolver.
       managedTools: this.app.versionManager?.managedTools ?? null,
+      internalRuntime: { resolve: () => resolveInternalNodeRuntime() },
       send: (channel, payload) => {
         const target = this.window;
         if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;

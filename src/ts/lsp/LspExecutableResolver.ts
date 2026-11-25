@@ -28,6 +28,14 @@ export interface ManagedToolPort {
   resolve(packageId: string, entryPoint?: string): ReturnType<ManagedToolResolver["resolve"]>;
 }
 
+/**
+ * The standalone Node.js runtime NCE ships for its own tools. Injected so the
+ * resolver never has to discover a runtime from PATH or from a project.
+ */
+export interface InternalRuntimePort {
+  resolve(): Promise<{ executable: string; version: string }>;
+}
+
 export interface ResolveServerOptions {
   definition: LspServerDefinition;
   configuration: LspServerConfiguration | undefined;
@@ -35,6 +43,12 @@ export interface ResolveServerOptions {
   platform?: NodeJS.Platform;
   /** When provided, NCE-owned installations are preferred over PATH discovery. */
   managed?: ManagedToolPort | null;
+  /** Runtime used to launch script entry points. Required for managed scripts. */
+  internalRuntime?: InternalRuntimePort | null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isExecutableFile(stats: { isFile(): boolean; mode: number }, platform: NodeJS.Platform): boolean {
@@ -164,6 +178,7 @@ export async function resolveServerExecutable(
     env = process.env,
     platform = process.platform,
     managed = null,
+    internalRuntime = null,
   } = options;
 
   const configuredPath = typeof configuration?.path === "string"
@@ -215,7 +230,7 @@ export async function resolveServerExecutable(
 
   // 2. A server NCE installed itself.
   if (definition.managed && managed) {
-    const managedResolution = await resolveManaged(definition, managed, configuredArgs);
+    const managedResolution = await resolveManaged(definition, managed, configuredArgs, internalRuntime);
     if (managedResolution) return managedResolution;
   }
 
@@ -257,6 +272,7 @@ async function resolveManaged(
   definition: LspServerDefinition,
   managed: ManagedToolPort,
   configuredArgs: string[] | null,
+  internalRuntime: InternalRuntimePort | null,
 ): Promise<LspExecutableResolution | null> {
   const spec = definition.managed!;
   const server = await managed.resolve(spec.packageId, spec.entryPoint);
@@ -278,16 +294,29 @@ async function resolveManaged(
 
   const args = configuredArgs ?? spec.args;
 
-  // A script entry point needs its runtime: `node <entry> --stdio`.
+  // A script entry point runs on the runtime NCE ships, never on a runtime
+  // from the user's project or from PATH. `runtimePackageId` is retained on
+  // the definition for compatibility with existing configurations only.
   if (spec.runtimePackageId) {
-    const runtime = await managed.resolve(spec.runtimePackageId);
-    if (!runtime.available || !runtime.executable) {
+    if (!internalRuntime) {
       return {
         available: false,
         command: null,
         args: [],
         source: null,
-        error: `${definition.name} needs ${spec.runtimePackageId}, which is not usable: ${runtime.error || "not installed"}.`,
+        error: `${definition.name} needs the internal Node.js runtime, but no runtime resolver was provided.`,
+      };
+    }
+    let runtime;
+    try {
+      runtime = await internalRuntime.resolve();
+    } catch (error) {
+      return {
+        available: false,
+        command: null,
+        args: [],
+        source: null,
+        error: `${definition.name} cannot start: ${errorMessage(error)}`,
       };
     }
     const expanded = await expandPlaceholders(spec.initializationOptions, managed);

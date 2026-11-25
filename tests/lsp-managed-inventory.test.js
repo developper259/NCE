@@ -81,6 +81,7 @@ function createManager(workspace, managed, servers = {}) {
     pathAccess: new PathAccess(() => workspace),
     getSettings: () => ({ enabled: true, servers }),
     managedTools: managed,
+    internalRuntime: { resolve: async () => ({ executable: process.execPath, version: process.versions.node }) },
     send: (channel, payload) => {
       if (channel === "Lsp:diagnostics") events.diagnostics.push(payload);
       else if (channel === "Lsp:status") events.statuses.push(payload);
