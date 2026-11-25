@@ -77,6 +77,25 @@ function smokeAsar(asarPath) {
   };
 }
 
+function smokeEmbeddedRuntime(asarPath) {
+  const config = require('./internal-node-config.cjs');
+  const resourcesRoot = path.dirname(asarPath);
+  const binary = path.join(
+    resourcesRoot,
+    config.RESOURCE_DIR,
+    config.VERSION,
+    process.platform === 'win32' ? 'node.exe' : 'node',
+  );
+  if (!fs.existsSync(binary)) return { ok: false, reason: `missing binary ${binary}` };
+  const result = spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: 10000 });
+  return {
+    ok: result.status === 0 && String(result.stdout || '').trim() === `v${config.VERSION}`,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    reason: `expected v${config.VERSION}`,
+  };
+}
+
 const asars = findAsars(releaseRoot);
 if (!asars.length) {
   console.error("No packaged app.asar found under release/.");
@@ -92,7 +111,14 @@ for (const asarPath of asars) {
     console.error(result.error || result.stderr || result.stdout || "");
     process.exit(1);
   }
+  const runtime = smokeEmbeddedRuntime(asarPath);
+  if (!runtime.ok) {
+    console.error(`Packaged embedded runtime smoke test failed for ${asarPath}`);
+    console.error(runtime.reason, runtime.stderr || runtime.stdout || "");
+    process.exit(1);
+  }
   console.log(`Packaged PTY smoke test passed: ${path.relative(releaseRoot, asarPath)}`);
+  console.log(`Packaged embedded runtime smoke test passed: ${path.relative(releaseRoot, asarPath)}`);
 }
 if (!checked) {
   console.error("No packaged PTY smoke test could be executed for the host architecture.");

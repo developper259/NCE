@@ -133,6 +133,34 @@ for (const archive of archives) {
   const rendererSource = asar.extractFile(archive, toAsarLookupPath('dist/renderer/html/renderer.js')).toString();
   assert.doesNotMatch(rendererSource, /(?:@xterm\/|TerminalPanel)/, `${archive}: xterm leaked into the startup renderer bundle`);
 
+  // The embedded Node.js runtime is copied by extraResources into the app's
+  // resources directory, next to app.asar (never inside it).
+  const resourcesRoot = path.dirname(archive);
+  const internalNodeConfig = require('./internal-node-config.cjs');
+  const embeddedBinary = path.join(
+    resourcesRoot,
+    internalNodeConfig.RESOURCE_DIR,
+    internalNodeConfig.VERSION,
+    process.platform === 'win32' ? 'node.exe' : 'node',
+  );
+  assert.ok(
+    fs.existsSync(embeddedBinary),
+    `${archive}: embedded Node.js runtime missing at ${embeddedBinary}`,
+  );
+  if (process.platform !== 'win32') {
+    assert.notEqual(fs.statSync(embeddedBinary).mode & 0o111, 0,
+      `${archive}: embedded Node.js runtime is not executable`);
+  }
+  assert.ok(
+    fs.existsSync(path.join(resourcesRoot, internalNodeConfig.RESOURCE_DIR, internalNodeConfig.VERSION, 'LICENSE')),
+    `${archive}: Node.js license missing next to the embedded runtime`,
+  );
+  assert.equal(
+    [...files].some(file => file.includes('internal-node/')),
+    false,
+    `${archive}: embedded runtime must not be packed inside app.asar`,
+  );
+
   const unpackedRoot = `${archive}.unpacked`;
   assert.ok(fs.existsSync(unpackedRoot), `${archive}: no app.asar.unpacked directory`);
   const unpackedFiles = new Set();
