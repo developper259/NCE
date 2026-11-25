@@ -1,6 +1,9 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { test } = require("node:test");
 
 const {
@@ -228,6 +231,27 @@ test("a configured absolute path always wins over a managed installation", async
   assert.equal(resolution.available, true);
   assert.equal(resolution.source, "configured");
   assert.equal(resolution.command, process.execPath);
+});
+
+test("a Node.js found on PATH never replaces the internal runtime", async () => {
+  const externalNode = path.join(os.tmpdir(), "nce-external-node");
+  fs.writeFileSync(externalNode, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const externalDir = path.dirname(externalNode);
+  try {
+    const resolution = await resolveServerExecutable({
+      definition: getServerDefinition("pyright"),
+      configuration: undefined,
+      env: { PATH: externalDir },
+      platform: "darwin",
+      managed: managedPort({ pyright: PYRIGHT }),
+      internalRuntime: internalRuntimePort,
+    });
+    assert.equal(resolution.available, true);
+    assert.equal(resolution.command, NODE.executable, "only the internal runtime may launch the server");
+    assert.notEqual(resolution.command, externalNode);
+  } finally {
+    fs.rmSync(externalNode, { force: true });
+  }
 });
 
 test("a managed installation wins over PATH discovery", async () => {
