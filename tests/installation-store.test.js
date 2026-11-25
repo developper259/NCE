@@ -133,6 +133,11 @@ test("InstallationStore refuses to overwrite a newer schema (fail-closed)", asyn
     const status = await store.initialize();
     assert.equal(status.degraded, true);
     assert.equal(await store.add(record()), false);
+    assert.equal(
+      store.list().length,
+      0,
+      "a failed persist must not leave a phantom installation in memory",
+    );
     assert.equal(await fs.readFile(file, "utf8"), newer, "newer file is preserved");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

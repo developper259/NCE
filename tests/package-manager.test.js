@@ -92,6 +92,38 @@ test("PackageManager reconciles a pre-existing installation without reinstalling
   }
 });
 
+test("PackageManager recovers an install interrupted at commit time", async () => {
+  const userDataPath = await tempDir("nce-pm-crash-");
+  const fixture = await toolFixture("1.2.3");
+  try {
+    await withServer(fixture, async (url) => {
+      const distributions = { tool: toolDistribution(url, fixture.checksum) };
+      const managed = [managedTool("tool", "1.2.3")];
+      const first = createManager(userDataPath, { distributions, managed });
+      await first.manager.initialize();
+      const installed = await first.manager.install("tool");
+      assert.equal(installed.success, true);
+
+      // Simulate a crash after `rename(destination, backup)` but before the
+      // validated replacement was moved into place.
+      const staging = path.join(userDataPath, "tools", ".staging-tool-interrupted");
+      await fs.mkdir(staging, { recursive: true });
+      await fs.rename(installed.installDir, path.join(staging, "previous"));
+      await first.store.remove(first.store.listByPackage("tool")[0].id);
+
+      const second = createManager(userDataPath, { distributions, managed });
+      await second.manager.initialize();
+      const pkg = second.manager.getState().packages.find((p) => p.id === "tool");
+      assert.equal(pkg.state, "installed", "the previous working install must be restored");
+      assert.equal(pkg.installations.length, 1);
+      assert.equal(pkg.installations[0].installDir, installed.installDir);
+    });
+  } finally {
+    await fs.rm(userDataPath, { recursive: true, force: true });
+    await fs.rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("PackageManager uninstalls, clears managed settings and preserves external choices", async () => {
   const userDataPath = await tempDir("nce-pm-");
   const fixture = await toolFixture();

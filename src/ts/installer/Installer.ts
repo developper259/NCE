@@ -168,7 +168,11 @@ export class Installer {
         if (backup) await fs.rename(backup, destination).catch(() => {});
         throw new InstallerError("INSTALL_FAILED", `Could not move the validated installation into place: ${errorMessage(error)}`);
       }
-      if (backup) await fs.rm(backup, { recursive: true, force: true });
+      if (backup) {
+        // The new version is already in place. A cleanup failure must not turn
+        // a successful commit into a reported installation failure.
+        await fs.rm(backup, { recursive: true, force: true }).catch(() => {});
+      }
       report({ step: "complete", message: `${definition.name} ${definition.version} installed.` });
       return {
         success: true,
@@ -194,15 +198,16 @@ export class Installer {
       validateDefinition(definition);
       const platformConfig = resolvePlatformConfig(definition, this.platform, this.arch);
       const installDir = this.resolveDestination(definition);
-      const executable = path.resolve(installDir, platformConfig.executable);
-      if (!(await pathExists(executable))) return null;
-      const stats = await fs.stat(executable).catch(() => null);
-      if (!stats?.isFile()) return null;
+      // Presence of the executable is not enough: the rest of the installation
+      // may be missing or invalid. Reuse the real verification path so this
+      // public API cannot report a broken install as available.
+      const outcome = await this.verifyInstallation(packageId, installDir, { functional: false });
+      if (!outcome.success) return null;
       return {
         success: true,
         packageId: definition.id,
         version: definition.version,
-        executable,
+        executable: outcome.executable || path.resolve(installDir, platformConfig.executable),
         installDir,
         alreadyInstalled: true,
       };
@@ -316,6 +321,11 @@ export class Installer {
 
   private toolsRoot(): string {
     return path.join(this.userDataPath, "tools");
+  }
+
+  /** Public so the inventory can recover an install interrupted at commit time. */
+  destinationFor(packageId: string): string {
+    return this.resolveDestination(getPackageDefinition(packageId, this.registry));
   }
 
   private resolveDestination(definition: PackageDefinition): string {

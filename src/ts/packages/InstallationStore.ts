@@ -121,8 +121,16 @@ export class InstallationStore {
   async add(record: InstallationRecord): Promise<boolean> {
     const valid = validateRecord(record);
     if (!valid || this.records.has(valid.id)) return false;
+    const previous = this.records.get(valid.id) ?? null;
     this.records.set(valid.id, valid);
-    return this.persist();
+    if (!(await this.persist())) {
+      // Memory must never claim an installation that could not be persisted:
+      // it would disappear on the next launch while the UI showed it as ready.
+      if (previous) this.records.set(valid.id, previous);
+      else this.records.delete(valid.id);
+      return false;
+    }
+    return true;
   }
 
   async update(id: string, patch: Partial<InstallationRecord>): Promise<InstallationRecord | null> {
@@ -138,14 +146,22 @@ export class InstallationStore {
     const valid = validateRecord(candidate);
     if (!valid) return null;
     this.records.set(id, valid);
-    const saved = await this.persist();
-    return saved ? cloneRecord(valid) : null;
+    if (!(await this.persist())) {
+      this.records.set(id, existing);
+      return null;
+    }
+    return cloneRecord(valid);
   }
 
   async remove(id: string): Promise<boolean> {
-    if (!this.records.has(id)) return false;
+    const previous = this.records.get(id);
+    if (!previous) return false;
     this.records.delete(id);
-    return this.persist();
+    if (!(await this.persist())) {
+      this.records.set(id, previous);
+      return false;
+    }
+    return true;
   }
 
   flush(): Promise<boolean> {
@@ -154,13 +170,14 @@ export class InstallationStore {
 
   private persist(): Promise<boolean> {
     if (this.degraded) return Promise.resolve(false);
-    const snapshot: StoreFile = {
-      schemaVersion: INSTALLATION_SCHEMA_VERSION,
-      installations: [...this.records.values()].map(cloneRecord),
-    };
+    // Take the snapshot when the write actually starts, not when it is queued:
+    // a queued write must not persist a state that has since been rolled back.
     this.writeQueue = this.writeQueue
       .catch(() => false)
-      .then(() => this.writeSnapshot(snapshot));
+      .then(() => this.writeSnapshot({
+        schemaVersion: INSTALLATION_SCHEMA_VERSION,
+        installations: [...this.records.values()].map(cloneRecord),
+      }));
     return this.writeQueue;
   }
 

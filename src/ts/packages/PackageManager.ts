@@ -379,6 +379,7 @@ export class PackageManager {
 
   /** Reconcile the inventory with the filesystem: import, refresh, mark or drop records. */
   private async reconcile(): Promise<void> {
+    await this.recoverInterruptedCommits();
     for (const definition of this.registry.list()) {
       this.external.delete(definition.id);
       this.issues.delete(definition.id);
@@ -421,6 +422,45 @@ export class PackageManager {
         if (!seen.has(path.resolve(record.installDir))) await this.store.remove(record.id);
       }
       await this.detectExternal(definition);
+    }
+  }
+
+  /**
+   * Recover an install interrupted between moving the old version aside and
+   * moving the validated new version into place. In that window the destination
+   * is missing and the previous install lives in a staging backup folder.
+   * Without this, reconciliation would drop the record and lose a working install.
+   */
+  private async recoverInterruptedCommits(): Promise<void> {
+    const toolsRoot = path.join(this.userDataPath, "tools");
+    let entries: string[];
+    try {
+      entries = await fs.readdir(toolsRoot);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const match = /^\.staging-([a-zA-Z0-9][a-zA-Z0-9._-]+)-/.exec(entry);
+      if (!match || !this.registry.has(match[1])) continue;
+      const staging = path.join(toolsRoot, entry);
+      const previous = path.join(staging, "previous");
+      if (!await this.directoryExists(previous)) continue;
+      const definition = this.registry.get(match[1]);
+      const destination = this.installer.destinationFor(definition.installerPackageId);
+      if (await this.directoryExists(destination)) continue;
+      try {
+        await fs.rename(previous, destination);
+      } catch {
+        // Leave the backup in place for the next launch rather than losing it.
+      }
+    }
+  }
+
+  private async directoryExists(target: string): Promise<boolean> {
+    try {
+      return (await fs.stat(target)).isDirectory();
+    } catch {
+      return false;
     }
   }
 
