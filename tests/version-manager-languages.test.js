@@ -390,3 +390,69 @@ test("component operations are surfaced while a plan runs", async () => {
 
   assert.ok(textOf(document.body).includes("Installing Python Runtime"));
 });
+
+test("installation progress is shown as a comprehensible status", async () => {
+  let emit = null;
+  const { document, manager } = setup();
+  manager.api.onEvent = (callback) => { emit = callback; return () => {}; };
+  await manager.show();
+  await flush();
+  manager.subscribe?.();
+  manager.openDetail("python");
+
+  emit({
+    type: "component-operation",
+    componentId: "python.runtime",
+    state: "running",
+    message: "Téléchargement en cours…",
+  });
+  const line = walk(document.body, (node) =>
+    node.className && String(node.className).includes("nce-vm-env-progress-line"))[0];
+  assert.ok(line, "the progress line is rendered");
+  assert.equal(line.getAttribute("role"), "status");
+  assert.ok(textOf(line).includes("Téléchargement en cours"));
+});
+
+test("a failed operation shows an error status and keeps the retry action", async () => {
+  let emit = null;
+  const { document, manager } = setup();
+  manager.api.onEvent = (callback) => { emit = callback; return () => {}; };
+  await manager.show();
+  await flush();
+  manager.subscribe?.();
+  manager.openDetail("python");
+
+  emit({
+    type: "component-operation",
+    componentId: "python.runtime",
+    state: "failed",
+    message: "Le téléchargement a échoué. Réessayez.",
+  });
+  const line = walk(document.body, (node) =>
+    node.className && String(node.className).includes("nce-vm-env-progress-failed"))[0];
+  assert.ok(line, "the failure is visible");
+  assert.ok(byFocusKey(document.body, "vm-apply-components-python"), "retry stays available");
+});
+
+test("the environment page works in both themes and narrow windows", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const css = fs.readFileSync(path.join(root, "src/css/versionManager.css"), "utf8");
+  const themeVars = fs.readFileSync(path.join(root, "src/css/var.css"), "utf8");
+
+  // Every environment rule uses tokens defined in both palettes.
+  const envCss = css.slice(css.indexOf("/* Language environment page"), css.indexOf("/* Component rows"));
+  const usedVars = new Set([...envCss.matchAll(/var\((--[a-z-]+)\)/g)].map((match) => match[1]));
+  const darkBlock = themeVars.slice(0, themeVars.indexOf(':root[data-theme="light"]'));
+  const lightBlock = themeVars.slice(themeVars.indexOf(':root[data-theme="light"]'));
+  for (const name of usedVars) {
+    // A token may be defined once in :root and inherited by both themes.
+    const defined = darkBlock.includes(`${name}:`) || lightBlock.includes(`${name}:`);
+    assert.ok(defined, `missing theme token ${name}`);
+  }
+  // The light theme must at least redefine the surfaces and text it changes.
+  for (const name of ["--bg-secondary", "--bg-tertiary", "--text-primary", "--border-primary"])
+    assert.ok(lightBlock.includes(`${name}:`), `light theme is missing ${name}`);
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*nce-vm-env-header/);
+  assert.match(css, /prefers-reduced-motion[\s\S]*nce-vm-env-working/);
+});
