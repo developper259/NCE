@@ -150,3 +150,38 @@ test("the staged runtime reports its pinned version", () => {
   assert.equal(result.stdout.trim(), `v${config.VERSION}`);
   assert.ok(fs.existsSync(path.join(dir, "LICENSE")), "Node license must ship with the binary");
 });
+
+test("development finds the staged runtime when getAppPath() is the dist folder", async () => {
+  // `npm start` runs dist/main.js, so Electron reports <root>/dist as the app
+  // path while the build stages the binary in <root>/resources. Looking only in
+  // <appPath>/resources made every LSP report "the internal Node.js runtime is
+  // unavailable" as soon as a server tried to start.
+  const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nce-app-dist-"));
+  try {
+    const dir = path.join(appRoot, "resources", config.RESOURCE_DIR, config.VERSION);
+    fs.mkdirSync(dir, { recursive: true });
+    const binary = path.join(dir, process.platform === "win32" ? "node.exe" : "node");
+    fs.writeFileSync(binary, "stub");
+    fs.chmodSync(binary, 0o755);
+    fs.mkdirSync(path.join(appRoot, "dist"), { recursive: true });
+
+    const dev = await resolveInternalNodeRuntime({
+      appPath: path.join(appRoot, "dist"),
+      isPackaged: false,
+    });
+    assert.equal(dev.executable, binary);
+    assert.equal(dev.source, "development");
+
+    // The walk-up is development only: a packaged app still reads resourcesPath.
+    await assert.rejects(
+      resolveInternalNodeRuntime({
+        appPath: path.join(appRoot, "dist"),
+        isPackaged: true,
+        resourcesPath: path.join(appRoot, "missing"),
+      }),
+      /does not exist/,
+    );
+  } finally {
+    fs.rmSync(appRoot, { recursive: true, force: true });
+  }
+});

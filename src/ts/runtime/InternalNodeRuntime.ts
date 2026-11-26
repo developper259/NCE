@@ -1,5 +1,6 @@
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import fs from "node:fs";
+import { promises as fsp } from "node:fs";
 
 /**
  * The Node.js runtime owned by NCE itself.
@@ -54,10 +55,36 @@ function resourcesRoot(options: InternalNodeRuntimeOptions): string | null {
   // by the build script, while process.resourcesPath points inside Electron's
   // own dist folder. Using the latter in dev would never find the binary.
   if (options.isPackaged === false || !electronResources) {
-    return options.appPath ? path.join(options.appPath, "resources") : null;
+    if (!options.appPath) return null;
+    const direct = path.join(options.appPath, "resources");
+    // With `npm start`, Electron derives getAppPath() from dist/main.js, so it
+    // returns <root>/dist while the build stages the binary in <root>/resources.
+    // Walk up one level when the direct location has no staged runtime. This is
+    // development only: packaged layouts and explicit overrides are untouched.
+    if (hasStagedRuntime(direct, options)) return direct;
+    const parent = path.join(options.appPath, "..", "resources");
+    if (hasStagedRuntime(parent, options)) return parent;
+    return direct;
   }
   return electronResources;
 }
+
+/** Whether a resources directory already contains the staged runtime. */
+function hasStagedRuntime(
+  resourcesDir: string,
+  options: InternalNodeRuntimeOptions,
+): boolean {
+  const candidate = path.join(
+    resourcesDir,
+    RESOURCE_DIR,
+    options.version || INTERNAL_NODE_VERSION,
+    executableName(options.platform || process.platform),
+  );
+  try {
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }}
 
 /**
  * Resolve the embedded runtime without ever falling back to PATH or to a
@@ -84,7 +111,7 @@ export async function resolveInternalNodeRuntime(
 
   let stats;
   try {
-    stats = await fs.stat(executable);
+    stats = await fsp.stat(executable);
   } catch {
     throw new Error(
       `The internal Node.js runtime is unavailable: ${executable} does not exist. ` +
