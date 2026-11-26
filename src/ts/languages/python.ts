@@ -5,6 +5,19 @@ export const python: LanguageDefinition = {
   id: "python",
   name: "Python",
   description: "CPython runtime and Pyright language server for Python projects.",
+  summary: "Tout le nécessaire pour coder en Python dans NCE.",
+  benefits: [
+    {
+      title: "Exécuter vos programmes",
+      description: "Lancez vos fichiers et projets Python.",
+      icon: "fi-rr-play",
+    },
+    {
+      title: "Aide à l'écriture",
+      description: "Suggestions de code, détection des erreurs et navigation.",
+      icon: "fi-rr-sparkles",
+    },
+  ],
   categories: ["language"],
   icon: "fi fi-brands-python",
   fileExtensions: [".py", ".pyi", ".pyw"],

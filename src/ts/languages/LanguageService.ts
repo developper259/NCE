@@ -58,6 +58,8 @@ export class LanguageService {
       categories: [...language.categories],
       icon: language.icon,
       fileExtensions: [...language.fileExtensions],
+      summary: language.summary,
+      benefits: language.benefits?.map((benefit) => ({ ...benefit })),
       components: language.components.map((component) => this.componentInfo(component)),
     }));
   }

@@ -39,6 +39,21 @@ test("LanguageService lists every language with real component versions", () => 
   assert.equal(py.components.find((c) => c.id === "python.runtime").installableVersion, "3.12.16");
 });
 
+test("LanguageService exposes plain-language presentation data for every language", () => {
+  for (const language of service.list()) {
+    assert.equal(typeof language.summary, "string");
+    assert.ok(language.summary.length > 0, `${language.id} needs a summary`);
+    assert.ok(Array.isArray(language.benefits) && language.benefits.length >= 2);
+    for (const benefit of language.benefits) {
+      assert.ok(benefit.title && benefit.description && benefit.icon);
+      // Technical internals must not leak into the user-facing presentation.
+      for (const text of [benefit.title, benefit.description, language.summary]) {
+        assert.equal(/\b(LSP|runtime|Runtime|package|Package|language server)\b/.test(text), false, text);
+      }
+    }
+  }
+});
+
 test("LanguageService maps packages to their owning language", () => {
   assert.equal(service.languageForPackage("typescript"), "javascript");
   assert.equal(service.languageForPackage("typescript-language-server"), "javascript");

@@ -12,6 +12,19 @@ export const javascript: LanguageDefinition = {
   id: "javascript",
   name: "JavaScript & TypeScript",
   description: "JavaScript runtime, TypeScript compiler and language server for JavaScript and TypeScript projects.",
+  summary: "Tout le nécessaire pour coder en JavaScript et TypeScript dans NCE.",
+  benefits: [
+    {
+      title: "Exécuter vos programmes",
+      description: "Lancez vos fichiers et projets JavaScript et TypeScript.",
+      icon: "fi-rr-play",
+    },
+    {
+      title: "Aide à l'écriture",
+      description: "Suggestions de code, détection des erreurs et navigation.",
+      icon: "fi-rr-sparkles",
+    },
+  ],
   categories: ["language"],
   icon: "fi fi-brands-js",
   fileExtensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],

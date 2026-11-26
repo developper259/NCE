@@ -45,6 +45,18 @@ export interface LanguageComponentDefinition {
   defaultSelected?: boolean;
 }
 
+/**
+ * A user-facing benefit of installing a language environment.
+ *
+ * These are written in plain language: the renderer shows them instead of the
+ * internal component names. Icons are existing Flaticon classes.
+ */
+export interface LanguageBenefit {
+  title: string;
+  description: string;
+  icon: string;
+}
+
 /** A language is a named group of independently installable components. */
 export interface LanguageDefinition {
   id: string;
@@ -55,6 +67,10 @@ export interface LanguageDefinition {
   fileExtensions: string[];
   components: LanguageComponentDefinition[];
   defaultSelection?: string[];
+  /** Short user-facing sentence shown under the language name. */
+  summary?: string;
+  /** Two or three concrete benefits, shown as a simple list. */
+  benefits?: LanguageBenefit[];
 }
 
 /** Component enriched with the state of its underlying managed package. */
@@ -66,4 +82,6 @@ export interface LanguageComponentInfo extends LanguageComponentDefinition {
 /** Language enriched with resolved component state for the renderer. */
 export interface LanguageInfo extends Omit<LanguageDefinition, "components"> {
   components: LanguageComponentInfo[];
+  summary?: string;
+  benefits?: LanguageBenefit[];
 }
