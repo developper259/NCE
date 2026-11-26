@@ -456,3 +456,26 @@ test("the environment page works in both themes and narrow windows", () => {
   assert.match(css, /@media \(max-width: 720px\)[\s\S]*nce-vm-env-header/);
   assert.match(css, /prefers-reduced-motion[\s\S]*nce-vm-env-working/);
 });
+
+test("an optional component does not keep a complete environment out of 'Installé'", async () => {
+  // A language may later add a component that is not part of the recommended
+  // installation (a formatter, a linter). Its absence must not leave the
+  // environment stuck on "Installation partielle" forever.
+  const withOptional = {
+    ...languageView,
+    components: [
+      ...languageView.components,
+      languageComponent("python.ruff", "Ruff", "toolchain", "ruff", {
+        installableVersion: "0.14.0", defaultSelected: false,
+      }),
+    ],
+    plan: { ...languageView.plan, toInstall: [], unchanged: ["python.runtime", "python.lsp"] },
+  };
+  const { document, manager } = setup({ views: { python: withOptional } });
+  await manager.show();
+  await flush();
+  manager.openDetail("python");
+  const text = textOf(document.body);
+  assert.match(text, /Installé/);
+  assert.equal(text.includes("Installation partielle"), false);
+});

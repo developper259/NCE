@@ -58,6 +58,10 @@ class VersionManagerLanguageDetail {
   /**
    * Environment state, derived from the real component plan and the running
    * operation. A partially installed environment is never reported as complete.
+   *
+   * Only required components count. A component declared `defaultSelected:
+   * false` is optional, so a language that later adds one (a formatter, a
+   * linter) must still be able to reach "Installé" without it.
    */
   static environmentState(view) {
     const plan = view.plan;
@@ -65,8 +69,12 @@ class VersionManagerLanguageDetail {
     if ((plan.blockers?.length || 0) > 0) {
       return { state: "error", label: "Installation incomplète", icon: "fi-rr-triangle-warning" };
     }
-    const total = (view.components || []).length;
-    const done = (plan.unchanged || []).length;
+    const required = (view.components || []).filter(
+      (component) => component.defaultSelected !== false,
+    );
+    const total = required.length;
+    const installed = new Set(plan.unchanged || []);
+    const done = required.filter((component) => installed.has(component.id)).length;
     if (done > 0 && done < total) {
       return { state: "partial", label: "Installation partielle", icon: "fi-rr-triangle-warning" };
     }

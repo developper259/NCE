@@ -178,3 +178,37 @@ test("Python never reports a JavaScript component as its own", () => {
     false,
   );
 });
+
+test("the grouped JavaScript & TypeScript install reuses what is already there", () => {
+  const selected = ["javascript.typescript", "javascript.lsp"];
+  const planFor = (installed) => service.view("javascript", snapshot(installed), selected).plan;
+
+  // Nothing installed: both components, dependency first.
+  assert.deepEqual(planFor({}).toInstall, ["javascript.typescript", "javascript.lsp"]);
+
+  // SDK already verified: only the server is installed.
+  assert.deepEqual(planFor({ typescript: "installed" }).toInstall, ["javascript.lsp"]);
+
+  // Server already present: only the missing SDK is installed, and it still
+  // comes first because the server depends on it.
+  const serverOnly = planFor({ "typescript-language-server": "installed" });
+  assert.deepEqual(serverOnly.toInstall, ["javascript.typescript"]);
+
+  // Complete environment: a repeated install downloads nothing.
+  const complete = planFor({ typescript: "installed", "typescript-language-server": "installed" });
+  assert.deepEqual(complete.toInstall, []);
+  assert.deepEqual(complete.unchanged.sort(), ["javascript.lsp", "javascript.typescript"]);
+
+  // A corrupted SDK is repaired, and the healthy server is not reinstalled.
+  assert.deepEqual(
+    planFor({ typescript: "corrupted", "typescript-language-server": "installed" }).toInstall,
+    ["javascript.typescript"],
+  );
+
+  // Grouped uninstall removes dependents first.
+  assert.deepEqual(planFor({ typescript: "installed", "typescript-language-server": "installed" })
+    .toUninstall, []);
+  assert.deepEqual(service.view("javascript", snapshot({
+    typescript: "installed", "typescript-language-server": "installed",
+  }), []).plan.toUninstall, ["javascript.lsp", "javascript.typescript"]);
+});
