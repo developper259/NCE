@@ -108,7 +108,10 @@ function extractZipEntry(archive, wanted, output) {
       let found = false;
       zipFile.readEntry();
       zipFile.on("entry", (entry) => {
-        if (entry.fileName !== wanted) {
+        // Official Node archives wrap every entry in a top-level directory named
+        // after the distribution. Match on the suffix, mirroring extractTarGz.
+        const name = entry.fileName.replace(/^\.\//, "");
+        if (name !== wanted && !name.endsWith(`/${wanted}`)) {
           zipFile.readEntry();
           return;
         }
