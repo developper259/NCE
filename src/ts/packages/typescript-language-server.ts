@@ -1,6 +1,13 @@
 import type { ManagedPackageDefinition } from "./types";
 
-/** typescript-language-server, installed as an isolated npm tarball. */
+/**
+ * typescript-language-server, installed as an isolated npm tarball.
+ *
+ * The catalog does not list it as its own card: it is a component of the
+ * JavaScript & TypeScript language, which installs it through its components.
+ * `hiddenFromCatalog` makes that explicit instead of relying only on the
+ * `language-server` category filter.
+ */
 export const typescriptLanguageServer: ManagedPackageDefinition = {
   id: "typescript-language-server",
   name: "TypeScript Language Server",
@@ -15,4 +22,5 @@ export const typescriptLanguageServer: ManagedPackageDefinition = {
   installableVersion: "6.1.0",
   installationRoot: "tools/typescript-language-server",
   uninstall: { strategy: "installer-directory" },
+  hiddenFromCatalog: true,
 };

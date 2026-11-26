@@ -19,7 +19,7 @@ export const typescript: ManagedPackageDefinition = {
   capabilities: ["install", "uninstall", "verify"],
   dependencies: [],
   installerPackageId: "typescript",
-  installableVersion: "5.9.3",
+  installableVersion: "6.0.3",
   installationRoot: "tools/typescript",
   uninstall: { strategy: "installer-directory" },
   hiddenFromCatalog: true,

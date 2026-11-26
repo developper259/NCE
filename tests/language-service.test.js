@@ -33,7 +33,7 @@ test("LanguageService lists every language with real component versions", () => 
   assert.equal(js.name, "JavaScript & TypeScript");
   assert.deepEqual(js.fileExtensions, [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"]);
   assert.equal(js.components.some((c) => c.id === "javascript.runtime"), false);
-  assert.equal(js.components.find((c) => c.id === "javascript.typescript").installableVersion, "5.9.3");
+  assert.equal(js.components.find((c) => c.id === "javascript.typescript").installableVersion, "6.0.3");
   assert.equal(js.components.find((c) => c.id === "javascript.lsp").installableVersion, "6.1.0");
   const py = list.find((item) => item.id === "python");
   assert.equal(py.components.find((c) => c.id === "python.runtime").installableVersion, "3.12.16");

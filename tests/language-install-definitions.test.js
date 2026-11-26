@@ -45,13 +45,36 @@ test("Node.js is not an installable package: NCE ships its own runtime", () => {
 test("npm tarballs use verified sha512 integrity and presence verification", () => {
   const ts = builtinPackages.typescript;
   const tsls = builtinPackages["typescript-language-server"];
-  assert.match(ts.platforms.darwin.x64.download.url, /registry\.npmjs\.org\/typescript\/-\/typescript-5\.9\.3\.tgz/);
+  assert.match(ts.platforms.darwin.x64.download.url, /registry\.npmjs\.org\/typescript\/-\/typescript-6\.0\.3\.tgz/);
   assert.equal(ts.platforms.darwin.x64.download.checksumAlgorithm, "sha512");
   assert.equal(ts.verification.mode, "presence");
   assert.equal(ts.verification.executable, "lib/tsserver.js");
   assert.match(tsls.platforms.darwin.x64.download.url, /typescript-language-server-6\.1\.0\.tgz/);
   assert.equal(tsls.verification.mode, "presence");
   assert.equal(tsls.verification.executable, "lib/cli.mjs");
+});
+
+test("the managed TypeScript SDK matches the major typescript-language-server is built for", () => {
+  const ts = builtinPackages.typescript;
+  const tsls = builtinPackages["typescript-language-server"];
+  const tsVersion = ts.version;
+  const serverVersion = tsls.version;
+
+  // typescript-language-server 6.x is built against TypeScript 6 (its own
+  // devDependency is ^6.0.3 and its README installs `typescript@6`). Pinning a
+  // 5.x SDK next to a 6.x server is exactly the mismatch this guards against.
+  assert.equal(serverVersion.split(".")[0], "6");
+  assert.equal(tsVersion.split(".")[0], "6", `SDK ${tsVersion} must match server ${serverVersion}`);
+
+  // The tarball name and the declared version must never drift apart.
+  assert.equal(ts.platforms.darwin.x64.download.url.endsWith(`typescript-${tsVersion}.tgz`), true);
+  assert.equal(tsls.platforms.darwin.x64.download.url.endsWith(`typescript-language-server-${serverVersion}.tgz`), true);
+
+  // The managed package and the installer distribution must agree on the version.
+  const managedTs = builtinManagedPackages.find((definition) => definition.id === "typescript");
+  const managedServer = builtinManagedPackages.find((definition) => definition.id === "typescript-language-server");
+  assert.equal(managedTs.installableVersion, tsVersion);
+  assert.equal(managedServer.installableVersion, serverVersion);
 });
 
 test("managed packages and language definitions are consistent with the registry", () => {
