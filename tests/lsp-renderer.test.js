@@ -937,6 +937,39 @@ test("closing a record does not drop a synchronization that is still running", a
   assert.equal(openCalls, 1);
 });
 
+test("the problems panel only reports servers for the active file's language", () => {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
+  const controller = Object.create(LspController.prototype);
+  const lines = [];
+  controller.problemsPanel = { setServerStatus: (value) => lines.push(value) };
+  controller.progressByServer = new Map();
+  controller.editor = { tabManager: { activeFile: { language: "javascript" } } };
+  controller.status = {
+    servers: [
+      { id: "basedpyright", languages: ["python"] },
+      { id: "typescript-language-server", languages: ["javascript", "typescript"] },
+    ],
+    sessions: [
+      { serverId: "basedpyright", serverName: "Pyright", state: "failed", documents: 0, error: "Executable not found" },
+      { serverId: "typescript-language-server", serverName: "TypeScript", state: "ready", documents: 1, error: null },
+    ],
+  };
+
+  controller.updateProblemsStatus();
+  assert.equal(lines.at(-1), "TypeScript: ready, 1 document",
+    "a missing Python server is not shown while editing JavaScript");
+
+  controller.editor.tabManager.activeFile.language = "python";
+  controller.updateProblemsStatus();
+  assert.equal(lines.at(-1), "Pyright: Executable not found",
+    "the missing Python server is shown once a Python file is active");
+
+  // Without definition data the previous behaviour is preserved.
+  controller.status = { sessions: [{ serverId: "basedpyright", serverName: "Pyright", state: "failed", documents: 0, error: "Executable not found" }] };
+  controller.updateProblemsStatus();
+  assert.equal(lines.at(-1), "Pyright: Executable not found");
+});
+
 test("the problems panel reports persistent server state, not only progress", () => {
   const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
   const controller = Object.create(LspController.prototype);

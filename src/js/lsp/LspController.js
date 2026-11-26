@@ -62,6 +62,7 @@ class LspController {
       const unsubscribe = editor.tabManager.onActiveTabChange(() => {
         this.ensureActiveDocument();
         this.scheduleDiagnosticsOverlay();
+        this.updateProblemsStatus();
         this.hideTransientUi();
       });
       if (typeof unsubscribe === "function") this.unsubscribe.push(unsubscribe);
@@ -455,9 +456,23 @@ class LspController {
     const status = this.status;
     if (!status?.sessions?.length) return [];
     const parts = [];
+    // A missing server is only actionable for the language currently open.
+    // Showing "Pyright: Executable not found" while editing JavaScript is
+    // noise: it belongs to a language the user is not working on. Keep the
+    // filter limited to languages declared by the server definitions, so a
+    // status snapshot without that data keeps its previous behaviour.
+    const language = String(this.editor?.tabManager?.activeFile?.language || "").toLowerCase();
+    const definitions = Array.isArray(status.servers) ? status.servers : null;
     for (const session of status.sessions) {
       const name = session.serverName || session.serverId;
       if (!name) continue;
+      if (language && definitions) {
+        const definition = definitions.find((entry) => entry?.id === session.serverId);
+        if (definition && Array.isArray(definition.languages) &&
+            !definition.languages.some((id) => String(id).toLowerCase() === language)) {
+          continue;
+        }
+      }
       if (session.state === "ready") {
         const documents = session.documents || 0;
         parts.push(documents
