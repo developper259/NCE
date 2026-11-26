@@ -251,15 +251,14 @@ export async function resolveServerExecutable(
     }
   }
 
-  const managedHint = definition.managed
-    ? ` Install ${definition.managed.packageId} from the Version Manager, or`
-    : "";
+  // Kept short: this string is shown inline in the Problems panel next to
+  // the server name. Installation guidance lives in the Version Manager.
   return {
     available: false,
     command: null,
     args: [],
     source: null,
-    error: `Executable not found.${managedHint} install ${definition.commands[0]?.command || definition.id} or configure its absolute path.`,
+    error: "Executable not found",
   };
 }
 

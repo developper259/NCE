@@ -276,9 +276,9 @@ test("PATH discovery is still used when nothing is installed by NCE", async () =
     managed: managedPort({}),
   });
 
-  // No pyright on PATH in a clean environment: the failure must name both paths.
+  // No pyright on PATH in a clean environment: the inline status stays short.
   assert.equal(resolution.available, false);
-  assert.match(resolution.error, /Install pyright from the Version Manager/);
+  assert.equal(resolution.error, "Executable not found");
 });
 
 test("a corrupted managed install does not silently fall back to PATH", async () => {
