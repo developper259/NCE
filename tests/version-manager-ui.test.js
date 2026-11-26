@@ -796,7 +796,7 @@ test("install progress drives the footer and can be cancelled from the card", as
   assert.match(manager.footerStatus.textContent, /1 installed · 0 available/);
 });
 
-test("closing during an operation asks first and the operation continues in background", async () => {
+test("closing during an operation closes immediately and leaves it running in background", async () => {
   const { timers, state, manager } = setup();
   manager.show();
   await flush();
@@ -804,17 +804,13 @@ test("closing during an operation asks first and the operation continues in back
   await flush();
 
   manager.host.dispatch("keydown", { key: "Escape" });
-  assert.equal(manager.host.hidden, false, "Escape is guarded while an operation runs");
-  assert.match(manager.footerStatus.textContent, /Close the Version Manager anyway\?/);
-  assert.ok(buttonWithLabel(manager.footer, "Close anyway"));
-  assert.ok(buttonWithLabel(manager.footer, "Keep open"));
-
-  buttonWithLabel(manager.footer, "Keep open").click();
-  assert.match(manager.footerStatus.textContent, /Install Git/);
-
-  manager.host.dispatch("keydown", { key: "Escape" });
-  buttonWithLabel(manager.footer, "Close anyway").click();
   assert.equal(state.listeners.size, 0, "hidden popup unsubscribes from events");
+  assert.equal(
+    buttonWithLabel(manager.footer, "Close anyway"),
+    null,
+    "no confirmation buttons remain",
+  );
+  assert.equal(buttonWithLabel(manager.footer, "Keep open"), null);
   timers.tick(160);
   assert.equal(manager.host.hidden, true);
 
@@ -822,6 +818,7 @@ test("closing during an operation asks first and the operation continues in back
   state.emit({ type: "operation", operation: runningOperation({ state: "completed", finishedAt: Date.UTC(2026, 10, 17) }) });
   await flush();
   assert.equal(state.getStateCalls, callsWhileHidden, "backend events do not reload a hidden popup");
+  assert.deepEqual(state.cancels, [], "closing never cancels the download");
 
   manager.show();
   await flush();

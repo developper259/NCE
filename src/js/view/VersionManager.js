@@ -228,11 +228,9 @@ class VersionManager {
   }
 
   requestClose() {
-    if (this.activeOperation()) {
-      this.confirmation = { kind: "close" };
-      this.renderFooter();
-      return false;
-    }
+    // Closing the popup never stops an install: the operation lives in the
+    // main process and keeps running in the background. No confirmation is
+    // needed, so Escape and the close button always dismiss immediately.
     return this.hide();
   }
 
@@ -562,22 +560,6 @@ class VersionManager {
   renderFooter() {
     if (!this.footer) return;
     const operation = this.activeOperation();
-    if (this.confirmation?.kind === "close") {
-      this.footerStatus.textContent = "An operation is still running. Close the Version Manager anyway?";
-      this.footerProgress.hidden = true;
-      this.footerCancel.hidden = true;
-      this.replaceFooterActions([
-        this.createButton("Close anyway", () => {
-          this.confirmation = null;
-          this.hide();
-        }, { className: "nce-vm-button nce-vm-button-danger", focusKey: "vm-confirm-close" }),
-        this.createButton("Keep open", () => {
-          this.confirmation = null;
-          this.renderFooter();
-        }, { focusKey: "vm-keep-open" }),
-      ]);
-      return;
-    }
     this.restoreFooterActions();
     if (this.loading) {
       this.footerStatus.textContent = "Loading inventory…";
