@@ -479,3 +479,64 @@ test("an optional component does not keep a complete environment out of 'Install
   assert.match(text, /Installé/);
   assert.equal(text.includes("Installation partielle"), false);
 });
+
+test("a language whose packages are all hidden still gets one catalog entry", async () => {
+  // The real JavaScript & TypeScript environment: the TypeScript SDK is
+  // `hiddenFromCatalog` and the language server is a `language-server` package,
+  // so no package card is left. Without a language entry the environment was
+  // unreachable from the catalog.
+  const javascript = {
+    ...javascriptLanguageView(),
+    components: javascriptLanguageView().components.filter((c) => c.id !== "javascript.runtime"),
+    selected: ["javascript.typescript", "javascript.lsp"],
+  };
+  const { document, manager, calls } = setup({
+    languages: [javascript],
+    views: { javascript },
+    packages: [
+      packageInfo({
+        id: "typescript", name: "TypeScript", categories: ["language", "compiler"],
+        hiddenFromCatalog: true, installableVersion: "6.0.3",
+      }),
+      packageInfo({
+        id: "typescript-language-server", name: "TypeScript Language Server",
+        categories: ["language-server"], installableVersion: "6.1.0",
+      }),
+      packageInfo({ id: "git", name: "Git", categories: ["git"] }),
+    ],
+  });
+  await manager.show();
+  await flush();
+
+  // Exactly one entry for the environment, and no technical card beside it.
+  assert.ok(byFocusKey(manager.main, "vm-details-javascript"), "the environment is reachable");
+  assert.equal(byFocusKey(manager.main, "vm-details-typescript"), null);
+  assert.equal(byFocusKey(manager.main, "vm-details-typescript-language-server"), null);
+  assert.equal(byFocusKey(manager.main, "vm-details-node"), null, "no Node.js card");
+  assert.match(manager.footerStatus.textContent, /0 installed · 2 available/);
+
+  // Its card installs the whole environment through the grouped path.
+  byFocusKey(manager.main, "vm-install-javascript").click();
+  await flush();
+  assert.equal(calls.apply.length, 1);
+  assert.equal(calls.apply[0].languageId, "javascript");
+  assert.deepEqual([...calls.apply[0].selected].sort(), ["javascript.lsp", "javascript.typescript"]);
+
+  // Opening it shows the environment, not a package detail page.
+  manager.openDetail("javascript");
+  const text = textOf(manager.main);
+  assert.match(text, /JavaScript & TypeScript/);
+  assert.match(text, /Inclus dans cette installation/);
+  assert.ok(byFocusKey(manager.main, "vm-apply-components-javascript"));
+});
+
+test("a language that owns a visible package keeps a single card", async () => {
+  // Python's package is the environment. Adding a language entry on top would
+  // show the same environment twice.
+  const { manager } = setup();
+  await manager.show();
+  await flush();
+  const cards = walk(manager.main, (node) => node.classList?.contains("nce-vm-card"));
+  assert.equal(cards.length, 1);
+  assert.ok(byFocusKey(manager.main, "vm-details-python"));
+});

@@ -414,7 +414,10 @@ class VersionManager {
   }
 
   openDetail(packageId) {
-    if (!this.packageById(packageId)) return;
+    // A language entry has no package of its own: its id is a language id, and
+    // the detail page is resolved from the language views instead.
+    const isLanguage = this.languageViews.has(packageId);
+    if (!isLanguage && !this.packageById(packageId)) return;
     this.state.selectPackage(packageId);
     this.renderMain();
     this.focusByKey("vm-back");
@@ -539,7 +542,11 @@ class VersionManager {
     }
 
     if (this.state.selectedPackageId) {
-      const languageId = this.languageForPackage(this.state.selectedPackageId);
+      // A language entry is selected by its language id, which no package owns:
+      // `languageForPackage` only matches package ids. Route it directly.
+      const languageId = this.languageViews.has(this.state.selectedPackageId)
+        ? this.state.selectedPackageId
+        : this.languageForPackage(this.state.selectedPackageId);
       if (languageId) {
         const languageDetail = VersionManagerLanguageDetail.render(this, languageId);
         if (languageDetail) {
@@ -589,8 +596,8 @@ class VersionManager {
     }
     this.footerProgress.hidden = true;
     this.footerCancel.hidden = true;
-    const packages = this.snapshot?.packages || [];
-    const summary = VersionManagerModel.summary(packages);
+    // The footer must count what the catalog shows, language entries included.
+    const summary = VersionManagerModel.summary(VersionManagerCatalog.entries(this));
     this.footerStatus.textContent = summary.attention
       ? `${summary.installed} installed · ${summary.attention} need attention`
       : `${summary.installed} installed · ${summary.available} available`;

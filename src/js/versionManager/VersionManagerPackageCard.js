@@ -40,6 +40,27 @@ class VersionManagerPackageCard {
       }));
     } else if (state === "uninstalling") {
       foot.appendChild(VersionManagerUI.element("span", "nce-vm-card-hint", "Uninstalling…"));
+    } else if (packageInfo.kind === "language") {
+      // A language entry installs its whole environment in one grouped apply.
+      // The card must never offer the per-package install path: that path takes
+      // a package id, and the language has no package of its own.
+      if (installed) {
+        foot.append(
+          VersionManagerUI.element("span", "nce-vm-card-hint", "Managed by NCE"),
+          VersionManagerUI.button("Manage", () => manager.openDetail(packageInfo.id), {
+            className: "nce-vm-button nce-vm-card-action",
+            focusKey: `vm-manage-${packageInfo.id}`,
+          }),
+        );
+      } else if (!packageInfo.supported) {
+        foot.appendChild(VersionManagerUI.element("span", "nce-vm-card-hint", "Not available on this platform"));
+      } else {
+        foot.appendChild(VersionManagerUI.button(`Install ${packageInfo.name}`, () => manager.installFullLanguage(packageInfo.id), {
+          className: "nce-vm-button nce-vm-button-primary nce-vm-card-action",
+          focusKey: `vm-install-${packageInfo.id}`,
+          icon: "fi-rr-download",
+        }));
+      }
     } else if (!installed && packageInfo.supported && packageInfo.capabilities.includes("install")) {
       foot.appendChild(VersionManagerUI.button("Install", () => manager.install(packageInfo.id), {
         className: "nce-vm-button nce-vm-button-primary nce-vm-card-action",
