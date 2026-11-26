@@ -106,6 +106,34 @@ function isInside(root: string, candidate: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+/**
+ * Merge resolution-time initialization options over the definition defaults.
+ *
+ * A shallow spread is wrong here: the managed TypeScript server contributes
+ * `{ tsserver: { fallbackPath } }`, and spreading it over a definition that
+ * already carried `{ tsserver: { path } }` would drop `path` instead of keeping
+ * both keys. Nested plain objects are merged recursively, arrays and scalars are
+ * replaced, and the later source wins on a real conflict. The result is
+ * deterministic: the same two inputs always produce the same object.
+ */
+export function mergeInitializationOptions(
+  base: Record<string, unknown> | undefined,
+  override: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!base) return override;
+  if (!override) return base;
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    const previous = merged[key];
+    const previousObject = asObject(previous);
+    const nextObject = asObject(value);
+    merged[key] = previousObject && nextObject
+      ? mergeInitializationOptions(previousObject, nextObject)
+      : value;
+  }
+  return merged;
+}
+
 const LSP_ERROR_CODES = new Set<LspErrorCode>([
   "LSP_DISABLED", "LSP_UNSUPPORTED_LANGUAGE", "LSP_SERVER_NOT_FOUND",
   "LSP_SERVER_START_FAILED", "LSP_INITIALIZE_FAILED", "LSP_SERVER_UNAVAILABLE",
@@ -1216,11 +1244,13 @@ export class LspManager {
       executable: resolution,
       root,
       workspaceRoot,
-      // Resolution-time options (for example the managed `tsserver.path`) win
-      // over the static definition defaults.
-      initializationOptions: resolution.initializationOptions
-        ? { ...(definition.initializationOptions ?? {}), ...resolution.initializationOptions }
-        : definition.initializationOptions,
+      // Resolution-time options (for example the managed tsserver fallback)
+      // are merged over the static definition defaults, never used to replace
+      // them: a definition option the user relies on must survive.
+      initializationOptions: mergeInitializationOptions(
+        definition.initializationOptions,
+        resolution.initializationOptions,
+      ),
       events: {
         onStatus: (updated) => {
           if (this.sessions.get(key) !== updated) return;

@@ -72,9 +72,11 @@ const SERVER_DEFINITIONS: LspServerDefinition[] = [
       args: ["--stdio"],
       // typescript-language-server resolves tsserver.js from a sibling
       // node_modules/typescript/lib, which does not exist here: NCE installs
-      // TypeScript in its own directory. `tsserver.path` is the officially
-      // supported way to point it at the managed TypeScript SDK.
-      initializationOptions: { tsserver: { path: "{tsserver}" } },
+      // TypeScript in its own directory. `fallbackPath` is the officially
+      // supported way to supply it as a last resort, so a project that ships
+      // its own usable TypeScript keeps using it. `path` would override the
+      // workspace version unconditionally, which is not what NCE wants.
+      initializationOptions: { tsserver: { fallbackPath: "{tsserver}" } },
     },
   },
   {

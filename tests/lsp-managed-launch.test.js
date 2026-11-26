@@ -103,7 +103,7 @@ test("Pyright launches through the internal Node.js runtime", async () => {
   assert.deepEqual(resolution.args, [PYRIGHT.executable, "--stdio"]);
 });
 
-test("TypeScript Language Server launches through the internal Node.js runtime with tsserver.path", async () => {
+test("TypeScript Language Server launches through the internal Node.js runtime with tsserver.fallbackPath", async () => {
   const resolution = await resolveServerExecutable({
     definition: getServerDefinition("typescript-language-server"),
     configuration: undefined,
@@ -118,9 +118,16 @@ test("TypeScript Language Server launches through the internal Node.js runtime w
   assert.equal(resolution.command, NODE.executable);
   assert.deepEqual(resolution.args, [TLS.executable, "--stdio"]);
   assert.equal(
-    resolution.initializationOptions.tsserver.path,
+    resolution.initializationOptions.tsserver.fallbackPath,
     TYPESCRIPT.executable,
-    "the managed TypeScript SDK must be passed as tsserver.path",
+    "the managed TypeScript SDK must be passed as tsserver.fallbackPath",
+  );
+  // `path` overrides the workspace TypeScript unconditionally. NCE must let a
+  // project keep its own usable SDK, so the managed one is only a fallback.
+  assert.equal(
+    resolution.initializationOptions.tsserver.path,
+    undefined,
+    "NCE must not force tsserver.path",
   );
 });
 
@@ -165,7 +172,7 @@ test("a Windows tsserver path survives placeholder expansion", async () => {
   // slash; only the tsserver path is produced by the code under test.
   assert.match(resolution.args[0], /cli\.mjs$/);
   assert.equal(resolution.args[1], "--stdio");
-  const tsserverPath = resolution.initializationOptions.tsserver.path;
+  const tsserverPath = resolution.initializationOptions.tsserver.fallbackPath;
   // The regression was a SyntaxError from splicing a Windows path into JSON,
   // which also mangled the backslashes. The path must survive intact.
   assert.ok(
@@ -342,4 +349,45 @@ test("the TypeScript server declares the full extension family", () => {
   for (const extension of [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"]) {
     assert.ok(definition.extensions.includes(extension), extension);
   }
+});
+
+test("initialization options merge deterministically instead of replacing tsserver", () => {
+  const { mergeInitializationOptions } = require("../dist/ts/lsp/LspManager.js");
+
+  // The definition carries a user-facing `tsserver.path`; the managed
+  // resolution contributes `fallbackPath`. A shallow spread would drop `path`.
+  const merged = mergeInitializationOptions(
+    { tsserver: { path: "/user/tsserver.js", logVerbosity: "verbose" }, maxTsServerMemory: 4096 },
+    { tsserver: { fallbackPath: "/managed/tsserver.js" } },
+  );
+  assert.deepEqual(merged, {
+    tsserver: {
+      path: "/user/tsserver.js",
+      logVerbosity: "verbose",
+      fallbackPath: "/managed/tsserver.js",
+    },
+    maxTsServerMemory: 4096,
+  });
+
+  // Scalars and arrays are replaced, not merged.
+  assert.deepEqual(
+    mergeInitializationOptions({ plugins: [{ name: "a" }], locale: "en" }, { plugins: [], locale: "fr" }),
+    { plugins: [], locale: "fr" },
+  );
+
+  // Missing sides are handled without inventing an empty object.
+  assert.deepEqual(mergeInitializationOptions(undefined, { tsserver: { fallbackPath: "/x" } }), {
+    tsserver: { fallbackPath: "/x" },
+  });
+  assert.deepEqual(mergeInitializationOptions({ a: 1 }, undefined), { a: 1 });
+  assert.equal(mergeInitializationOptions(undefined, undefined), undefined);
+
+  // Deterministic: same inputs, same output, and the inputs are not mutated.
+  const base = { tsserver: { path: "/user/tsserver.js" } };
+  const override = { tsserver: { fallbackPath: "/managed/tsserver.js" } };
+  const first = mergeInitializationOptions(base, override);
+  const second = mergeInitializationOptions(base, override);
+  assert.deepEqual(first, second);
+  assert.deepEqual(base, { tsserver: { path: "/user/tsserver.js" } });
+  assert.deepEqual(override, { tsserver: { fallbackPath: "/managed/tsserver.js" } });
 });
