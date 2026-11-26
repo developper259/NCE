@@ -5,24 +5,31 @@ import type { LanguageDefinition } from "./types";
  *
  * JavaScript and TypeScript share one language definition covering both
  * extension families. The Node.js runtime used by NCE's language servers is
- * shipped with the app, so it is no longer a component the user installs.
- * The TypeScript compiler and language server remain installable components.
+ * shipped with the app, so it is no longer a component the user installs, and
+ * it is not the runtime their project runs on: this environment adds code
+ * intelligence, not an execution runtime. The TypeScript compiler and language
+ * server remain installable components.
  */
 export const javascript: LanguageDefinition = {
   id: "javascript",
   name: "JavaScript & TypeScript",
-  description: "JavaScript runtime, TypeScript compiler and language server for JavaScript and TypeScript projects.",
-  summary: "Tout le nécessaire pour coder en JavaScript et TypeScript dans NCE.",
+  description: "Ajoutez les suggestions de code, la navigation et la détection des erreurs pour vos projets JavaScript et TypeScript.",
+  summary: "Suggestions de code, navigation et détection des erreurs pour vos projets JavaScript et TypeScript.",
   benefits: [
     {
-      title: "Exécuter vos programmes",
-      description: "Lancez vos fichiers et projets JavaScript et TypeScript.",
-      icon: "fi-rr-play",
+      title: "Suggestions de code",
+      description: "Complétion et informations au survol pendant que vous écrivez.",
+      icon: "fi-rr-sparkles",
     },
     {
-      title: "Aide à l'écriture",
-      description: "Suggestions de code, détection des erreurs et navigation.",
-      icon: "fi-rr-sparkles",
+      title: "Détection des erreurs",
+      description: "Les erreurs de type et de syntaxe apparaissent dans le panneau Problèmes.",
+      icon: "fi-rr-triangle-warning",
+    },
+    {
+      title: "Navigation dans le code",
+      description: "Définitions, références et renommage dans tout le projet.",
+      icon: "fi-rr-search-alt",
     },
   ],
   categories: ["language"],

@@ -218,3 +218,33 @@ test("presence verification installs a script package without an executable bit"
     await fs.rm(archive, { recursive: true, force: true });
   }
 });
+
+test("the JavaScript & TypeScript card promises code intelligence, not a runtime", () => {
+  const js = builtinLanguages.find((language) => language.id === "javascript");
+
+  // NCE ships its own Node.js for language servers, and it is not the runtime a
+  // project runs on. The card must not offer to run programs.
+  const titles = js.benefits.map((benefit) => benefit.title);
+  assert.equal(titles.includes("Exécuter vos programmes"), false);
+  for (const benefit of js.benefits) {
+    assert.equal(/exécuter|executer|run/i.test(benefit.title), false, benefit.title);
+  }
+
+  // The three promised capabilities, in plain language.
+  assert.ok(titles.includes("Suggestions de code"));
+  assert.ok(titles.includes("Détection des erreurs"));
+  assert.ok(titles.includes("Navigation dans le code"));
+
+  // No editor internals in the user-facing text.
+  for (const text of [js.name, js.summary, js.description, ...js.benefits.flatMap((b) => [b.title, b.description])]) {
+    assert.equal(/\b(LSP|runtime|Runtime|package|Package|language server|SDK|tsserver)\b/.test(text), false, text);
+  }
+
+  // Every benefit icon must exist in the Flaticon bundle.
+  const css = require("node:fs").readFileSync(
+    require.resolve("@flaticon/flaticon-uicons/css/all/all.css"), "utf8",
+  );
+  for (const benefit of js.benefits) {
+    assert.ok(css.includes(`.${benefit.icon}:before`), `${benefit.icon} exists in the icon bundle`);
+  }
+});
