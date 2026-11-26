@@ -228,11 +228,16 @@ const SERVER_DEFINITIONS: LspServerDefinition[] = [
 
 const EXTENSION_LANGUAGE = new Map<string, string>([
   [".js", "javascript"],
-  [".jsx", "javascript"],
+  // typescript-language-server derives the tsserver script kind from the
+  // language id (mode2ScriptKind): `javascript` opens a .jsx file as JS and
+  // `typescript` opens a .tsx file as TS, so JSX/TSX syntax is reported as
+  // errors. It accepts `javascriptreact` and `typescriptreact` for exactly
+  // these files, so the registry sends those ids instead.
+  [".jsx", "javascriptreact"],
   [".mjs", "javascript"],
   [".cjs", "javascript"],
   [".ts", "typescript"],
-  [".tsx", "typescript"],
+  [".tsx", "typescriptreact"],
   [".mts", "typescript"],
   [".cts", "typescript"],
   [".py", "python"],
@@ -277,7 +282,33 @@ export function getServerDefinition(id: string): LspServerDefinition | null {
 
 export function serversForLanguage(languageId: string): LspServerDefinition[] {
   return SERVER_DEFINITIONS.filter((definition) =>
-    definition.languages.includes(languageId));
+    // A server declares the base languages it serves (`javascript`,
+    // `typescript`). The React variants are the same language with a different
+    // script kind, so they must resolve to the same servers instead of
+    // matching nothing.
+    serverServesLanguage(definition, languageId));
+}
+
+/** `javascriptreact` -> `javascript`, `typescriptreact` -> `typescript`. */
+export function baseLanguageId(languageId: string): string {
+  if (languageId === "javascriptreact") return "javascript";
+  if (languageId === "typescriptreact") return "typescript";
+  return languageId;
+}
+
+/**
+ * Whether a server serves a document language.
+ *
+ * A definition declares the base languages it handles, so a JSX or TSX document
+ * must match the JavaScript or TypeScript server. Using the raw language id
+ * alone silently dropped those documents from every session.
+ */
+export function serverServesLanguage(
+  definition: LspServerDefinition,
+  languageId: string,
+): boolean {
+  return definition.languages.includes(languageId)
+    || definition.languages.includes(baseLanguageId(languageId));
 }
 
 export function isKnownServerId(id: string): boolean {

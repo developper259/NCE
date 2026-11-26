@@ -222,10 +222,15 @@ test("server registry maps NSH languages and resolves project roots", async () =
   assert.equal(languageIdForPath("/tmp/app.ts"), "typescript");
   assert.equal(languageIdForPath("/tmp/header.h"), "c");
   assert.equal(languageIdForPath("/tmp/image.svg"), "xml");
-  assert.equal(languageIdForPath("/tmp/view.tsx"), "typescript");
+  assert.equal(languageIdForPath("/tmp/view.tsx"), "typescriptreact");
   const typescriptServers = serversForLanguage("typescript");
   assert.equal(typescriptServers.some((server) => server.id === "typescript-language-server"), true);
   assert.equal(typescriptServers.some((server) => server.id === "eslint-language-server"), true);
+  // A .tsx document resolves to the React language id, which must still reach
+  // the same servers instead of matching none of them.
+  const reactServers = serversForLanguage("typescriptreact");
+  assert.equal(reactServers.some((server) => server.id === "typescript-language-server"), true);
+  assert.equal(serversForLanguage("javascriptreact").some((server) => server.id === "typescript-language-server"), true);
 
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "nce-lsp-root-"));
   const project = path.join(workspace, "packages", "app");

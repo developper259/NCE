@@ -12,6 +12,8 @@ import {
   getServerDefinitions,
   getServerDefinition,
   languageIdForPath,
+  baseLanguageId,
+  serverServesLanguage,
   resolveServerRoot,
   serversForLanguage,
   normalizeServerId,
@@ -809,7 +811,7 @@ export class LspManager {
       const settings = this.settings();
       for (const document of this.documents.all()) {
         const definition = getServerDefinition(serverId);
-        if (!definition || !definition.languages.includes(document.languageId)) continue;
+        if (!definition || !serverServesLanguage(definition, document.languageId)) continue;
         if (!this.serverEnabled(definition, settings)) continue;
         const workspace = await this.getWorkspace();
         if (!workspace) continue;
@@ -1144,7 +1146,7 @@ export class LspManager {
     for (const definition of definitions) {
       if (!this.serverEnabled(definition, settings)) continue;
       for (const document of this.documents.all()) {
-        if (!definition.languages.includes(document.languageId)) continue;
+        if (!serverServesLanguage(definition, document.languageId)) continue;
         const root = await resolveServerRoot(definition, document.path, workspace);
         const key = this.sessionKey(definition.id, root);
         // Already served: nothing to do. Re-attaching would send a second

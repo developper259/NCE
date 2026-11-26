@@ -328,11 +328,13 @@ test("Pyright is the single Python server id and basedpyright is an alias", () =
 test("extension mapping covers every declared JavaScript and TypeScript extension", () => {
   const cases = {
     ".js": "javascript",
-    ".jsx": "javascript",
+    // The React ids are what typescript-language-server needs to open these
+    // files with the JSX/TSX script kind instead of plain JS/TS.
+    ".jsx": "javascriptreact",
     ".mjs": "javascript",
     ".cjs": "javascript",
     ".ts": "typescript",
-    ".tsx": "typescript",
+    ".tsx": "typescriptreact",
     ".mts": "typescript",
     ".cts": "typescript",
     ".py": "python",
