@@ -143,6 +143,9 @@ export class ComponentOrchestrator {
         if (result.success) {
           emit(this.event(id, component.packageId, "verify", "completed", `${component.name} verified.`));
         } else {
+          // A component that fails verification is not completed: reporting it
+          // in both lists would let callers count it as a successful install.
+          completed.splice(completed.indexOf(id), 1);
           failed.push(id);
           emit(this.event(id, component.packageId, "verify", "failed", `${component.name} verification failed.`, this.asError(result)));
         }

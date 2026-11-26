@@ -171,7 +171,7 @@ export class PackageManager {
           code: "UNSUPPORTED_PLATFORM",
           error: `${definition.name} requires ${dependency.name}, which has no distribution for ${this.platform}/${this.arch}.`,
         };
-      if (this.hasUsableInstallation(dependencyId)) continue;
+      if (await this.hasUsableInstallation(dependencyId)) continue;
       const installed = await this.installWithDependencies(dependency, visiting);
       if (!installed.success) {
         return {
@@ -187,11 +187,16 @@ export class PackageManager {
     return this.installOne(definition);
   }
 
-  /** True when a package has at least one installation in a usable state. */
-  private hasUsableInstallation(packageId: string): boolean {
-    return this.store
-      .listByPackage(packageId)
-      .some((record) => record.state === "installed");
+  /** True when a package has at least one installation still present on disk. */
+  private async hasUsableInstallation(packageId: string): Promise<boolean> {
+    for (const record of this.store.listByPackage(packageId)) {
+      if (record.state !== "installed") continue;
+      // A record can outlive its directory (manual deletion, or an install
+      // through a channel that did not update the inventory). Never skip a
+      // dependency install on the strength of a stale record.
+      if (await this.directoryExists(record.installDir)) return true;
+    }
+    return false;
   }
 
   /**
@@ -264,7 +269,26 @@ export class PackageManager {
         .catch(() => null);
       if (verified?.success) version = this.parseVersion(definition, verified.stdout) ?? version;
       const record = await this.recordInstallation(definition, result, version);
-      await this.applyInstallSettings(definition, record);
+      if (!record) {
+        const failure: OperationFailure = {
+          success: false,
+          packageId,
+          code: "PERSISTENCE_FAILED",
+          error: `The installation could not be recorded in the inventory.`,
+        };
+        this.finishOperation(operation, "failed", { code: failure.code, message: failure.error });
+        return failure;
+      }
+      if (!(await this.applyInstallSettings(definition, record))) {
+        const failure: OperationFailure = {
+          success: false,
+          packageId,
+          code: "SETTINGS_UPDATE_FAILED",
+          error: `The managed settings could not be saved for ${definition.name}.`,
+        };
+        this.finishOperation(operation, "failed", { code: failure.code, message: failure.error });
+        return failure;
+      }
       this.finishOperation(operation, "completed");
       this.emitInventoryChanged(definition.id);
     } else {
@@ -308,8 +332,20 @@ export class PackageManager {
     }
 
     if (result.success) {
-      await this.applyUninstallSettings(definition, record);
-      await this.store.remove(record.id);
+      const settingsOk = await this.applyUninstallSettings(definition, record);
+      const removed = await this.store.remove(record.id);
+      if (!settingsOk || !removed) {
+        const failure: ManagedUninstallResult = {
+          success: false,
+          packageId: record.packageId,
+          code: !removed ? "PERSISTENCE_FAILED" : "SETTINGS_UPDATE_FAILED",
+          error: !removed
+            ? `The uninstallation could not be recorded in the inventory.`
+            : `The managed settings could not be cleared for ${definition.name}.`,
+        };
+        this.finishOperation(operation, "failed", { code: failure.code, message: failure.error });
+        return failure;
+      }
       this.finishOperation(operation, "completed");
       this.emitInventoryChanged(record.packageId);
     } else {
@@ -513,7 +549,7 @@ export class PackageManager {
     definition: ManagedPackageDefinition,
     result: Extract<InstallResult, { success: true }>,
     version: string,
-  ): Promise<InstallationRecord> {
+  ): Promise<InstallationRecord | null> {
     const installDir = path.resolve(result.installDir);
     const existing = this.store.findByInstallDir(installDir);
     const base = {
@@ -534,12 +570,12 @@ export class PackageManager {
       error: undefined,
     };
     if (existing) {
-      const updated = await this.store.update(existing.id, base);
-      return updated ?? { ...existing, ...base };
+      // Never fabricate a record when the write failed: memory would claim an
+      // installation that will vanish on the next launch.
+      return await this.store.update(existing.id, base);
     }
     const record: InstallationRecord = { id: this.createId(), installedAt: this.now(), ...base };
-    await this.store.add(record);
-    return record;
+    return (await this.store.add(record)) ? record : null;
   }
 
   private async detectExternal(definition: ManagedPackageDefinition): Promise<void> {
@@ -566,24 +602,28 @@ export class PackageManager {
     }
   }
 
-  private async applyInstallSettings(definition: ManagedPackageDefinition, record: InstallationRecord): Promise<void> {
-    if (!this.settings || !definition.managedSettings) return;
+  private async applyInstallSettings(definition: ManagedPackageDefinition, record: InstallationRecord): Promise<boolean> {
+    if (!this.settings || !definition.managedSettings) return true;
     const root = path.join(this.userDataPath, definition.installationRoot);
     for (const key of definition.managedSettings) {
       const current = this.settings.get(key);
       const value = typeof current === "string" ? current.trim() : "";
       // Adopt the managed build when unset or already managed; never override an explicit external choice.
-      if (!value || isInsidePath(value, root)) await this.settings.set(key, record.executable);
+      if ((!value || isInsidePath(value, root)) && !(await this.settings.set(key, record.executable)))
+        return false;
     }
+    return true;
   }
 
-  private async applyUninstallSettings(definition: ManagedPackageDefinition, record: InstallationRecord): Promise<void> {
-    if (!this.settings || !definition.managedSettings) return;
+  private async applyUninstallSettings(definition: ManagedPackageDefinition, record: InstallationRecord): Promise<boolean> {
+    if (!this.settings || !definition.managedSettings) return true;
     for (const key of definition.managedSettings) {
       const current = this.settings.get(key);
-      if (typeof current === "string" && isInsidePath(current, record.installDir))
-        await this.settings.set(key, "");
+      if (typeof current === "string" && isInsidePath(current, record.installDir) &&
+          !(await this.settings.set(key, "")))
+        return false;
     }
+    return true;
   }
 
   private packageInfo(definition: ManagedPackageDefinition): PackageInfo {

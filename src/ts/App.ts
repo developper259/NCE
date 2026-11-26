@@ -152,7 +152,12 @@ export class App {
     this.recentFolders = new RecentFoldersManager(userData);
     this.agentConversations = new AgentConversationStore(userData);
     this.agentSecrets = new AgentSecretStore(userData);
-    this.installer = new InstallerManager({ userDataPath: userData });
+    this.installer = new InstallerManager({ userDataPath: userData }, () => {
+      // Installations started from the Git sidebar or Settings bypass
+      // VersionManager. Reconcile the inventory so those changes are visible
+      // everywhere and managed executables resolve immediately.
+      void this.versionManager?.packages.refresh();
+    });
     this.windowSessionStore = new WindowSessionStore(userData, process.platform, this.agentSecrets);
     this.windowManager = new WindowManager(this, this.ipcRouter, this.windowSessionStore);
     this.externalOpenCoordinator = new ExternalOpenCoordinator(this.windowManager);

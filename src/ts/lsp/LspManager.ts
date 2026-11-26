@@ -752,8 +752,11 @@ export class LspManager {
       const serverId = normalizeServerId(requestedId);
       if (!getServerDefinition(serverId))
         throw new LspManagerError("LSP_INVALID_ARGUMENT", "Unknown language server.");
+      const previousAttempts = new Map<string, ServerAttempt>();
       for (const [key, attempt] of this.attempts) {
-        if (attempt.serverId === serverId) this.attempts.delete(key);
+        if (attempt.serverId !== serverId) continue;
+        previousAttempts.set(key, attempt);
+        this.attempts.delete(key);
       }
       for (const key of [...this.resolutions.keys()]) {
         if (key.startsWith(`${serverId}:`)) this.resolutions.delete(key);
@@ -793,6 +796,11 @@ export class LspManager {
           continue;
         }
         await this.attachDocumentToServer(definition, root, resolution, document, workspace);
+      }
+      // With no open document to re-attach, keep the previous failure reason:
+      // dropping it would hide an unavailable server from the Problems panel.
+      for (const [key, attempt] of previousAttempts) {
+        if (!this.sessions.has(key) && !this.attempts.has(key)) this.attempts.set(key, attempt);
       }
       void this.emitStatus();
       return { success: true };

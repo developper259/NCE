@@ -65,6 +65,41 @@ test("PackageManager installs a package, records the real version and emits even
   }
 });
 
+test("PackageManager reports a failed settings write instead of a successful install", async () => {
+  const userDataPath = await tempDir("nce-pm-");
+  const fixture = await toolFixture("1.2.3");
+  try {
+    await withServer(fixture, async (url) => {
+      const settings = memorySettings({ "tool.path": "" });
+      settings.set = async () => false;
+      const { manager } = createManager(userDataPath, {
+        distributions: { tool: toolDistribution(url, fixture.checksum) },
+        managed: [managedTool("tool", "1.2.3", { managedSettings: ["tool.path"] })],
+        settings,
+      });
+      const events = [];
+      manager.subscribe((event) => events.push(event));
+      await manager.initialize();
+
+      const result = await manager.install("tool");
+      assert.equal(result.success, false);
+      assert.equal(result.code, "SETTINGS_UPDATE_FAILED");
+      assert.ok(
+        events.some((event) => event.type === "operation" &&
+          event.operation.state === "failed" && event.operation.error?.code === "SETTINGS_UPDATE_FAILED"),
+        "the operation event carries the failure code",
+      );
+      assert.ok(
+        !events.some((event) => event.type === "inventory-changed"),
+        "no inventory change is announced for a failed operation",
+      );
+    });
+  } finally {
+    await fs.rm(userDataPath, { recursive: true, force: true });
+    await fs.rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("PackageManager reconciles a pre-existing installation without reinstalling", async () => {
   const userDataPath = await tempDir("nce-pm-");
   const fixture = await toolFixture("9.9.9");

@@ -82,6 +82,7 @@ export class Installer {
     options.signal?.addEventListener("abort", onExternalAbort, { once: true });
     if (options.signal?.aborted) controller.abort();
     let stagingDir: string | null = null;
+    let keepStaging = false;
     try {
       const definition = getPackageDefinition(packageId, this.registry);
       validateDefinition(definition);
@@ -175,7 +176,12 @@ export class Installer {
       try {
         await fs.rename(installDir, destination);
       } catch (error) {
-        if (backup) await fs.rename(backup, destination).catch(() => {});
+        if (backup) {
+          // If the rollback also fails, the backup is the only copy of the
+          // previous installation. Keep the staging directory so the next
+          // launch can restore it instead of deleting it here.
+          keepStaging = !(await fs.rename(backup, destination).then(() => true, () => false));
+        }
         throw new InstallerError("INSTALL_FAILED", `Could not move the validated installation into place: ${errorMessage(error)}`);
       }
       if (backup) {
@@ -199,7 +205,8 @@ export class Installer {
       options.signal?.removeEventListener("abort", onExternalAbort);
       this.active = null;
       this.activePackageId = null;
-      if (stagingDir) await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+      if (stagingDir && !keepStaging)
+        await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 

@@ -71,7 +71,11 @@ test("InstallerManager installs a package and streams progress to its window", a
   const server = await serve({ "/tool.tar.gz": staticRoute(archive.body) });
   try {
     const definition = definitionFor(`${server.origin}/tool.tar.gz`, archive.checksum);
-    const manager = new InstallerManager({ userDataPath, registry: { tool: definition } });
+    const changed = [];
+    const manager = new InstallerManager(
+      { userDataPath, registry: { tool: definition } },
+      (packageId) => changed.push(packageId),
+    );
     const ipc = createRegistrar();
     manager.handleIPC(ipc);
     assert.deepEqual([...ipc.handlers.keys()], [
@@ -90,6 +94,7 @@ test("InstallerManager installs a package and streams progress to its window", a
     assert.ok(sender.sent.every((message) => message.payload.packageId === "tool"));
     assert.ok(sender.sent.some((message) => message.payload.percent === 100));
     assert.equal(sender.sent[sender.sent.length - 1].payload.step, "complete");
+    assert.deepEqual(changed, ["tool"], "a successful install notifies the inventory owner");
 
     const status = await ipc.handlers.get("Installer:installation")({ sender }, { packageId: "tool" });
     assert.equal(status.executable, result.executable);
@@ -102,6 +107,11 @@ test("InstallerManager installs a package and streams progress to its window", a
     const removed = await ipc.handlers.get("Installer:uninstall")({ sender }, { packageId: "tool" });
     assert.equal(removed.success, true);
     assert.equal(removed.installDir, result.installDir);
+    assert.deepEqual(
+      changed,
+      ["tool", "tool", "tool"],
+      "each successful installer operation notifies the inventory owner",
+    );
     assert.equal(
       await ipc.handlers.get("Installer:installation")({ sender }, { packageId: "tool" }),
       null,
@@ -206,7 +216,7 @@ test("Installer IPC is wired into the app, the window and the preload", () => {
   const window = readFileSync(path.join(root, "src/ts/Window.ts"), "utf8");
   const preload = readFileSync(path.join(root, "src/js/main/Preload.js"), "utf8");
   assert.match(app, /import \{ InstallerManager \} from "\.\/manager\/InstallerManager";/);
-  assert.match(app, /this\.installer = new InstallerManager\(\{ userDataPath: userData \}\);/);
+  assert.match(app, /this\.installer = new InstallerManager\(\{ userDataPath: userData \}, \(\) => \{/);
   assert.match(window, /this\.app\.installer\?\.handleIPC\(this\.ipc\);/);
   assert.match(preload, /installer: \{/);
   assert.match(preload, /ipcRenderer\.invoke\("Installer:install", \{ packageId \}\)/);
