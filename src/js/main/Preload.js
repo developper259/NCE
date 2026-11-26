@@ -104,7 +104,7 @@ contextBridge.exposeInMainWorld("api", {
   installer: {
     install: (packageId) =>
       ipcRenderer.invoke("Installer:install", { packageId }),
-    cancel: () => ipcRenderer.invoke("Installer:cancel"),
+    cancel: (packageId) => ipcRenderer.invoke("Installer:cancel", { packageId }),
     getInstallation: (packageId) =>
       ipcRenderer.invoke("Installer:installation", { packageId }),
     uninstall: (packageId) =>

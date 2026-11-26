@@ -25,9 +25,9 @@ export class InstallerManager {
         },
       });
     });
-    ipc.handle("Installer:cancel", async () => {
-      this.installer.cancel();
-      return true;
+    ipc.handle("Installer:cancel", async (_event, payload) => {
+      const packageId = typeof payload?.packageId === "string" ? payload.packageId : undefined;
+      return this.installer.cancel(packageId);
     });
     ipc.handle("Installer:installation", async (_event, payload) => {
       const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";

@@ -373,7 +373,7 @@ export class PackageManager {
     if (!operation || operation.snapshot.state !== "running") return false;
     if (operation.snapshot.kind === "uninstall") return false;
     operation.controller.abort();
-    if (operation.snapshot.kind === "install") this.installer.cancel();
+    if (operation.snapshot.kind === "install") this.installer.cancel(packageId);
     return true;
   }
 

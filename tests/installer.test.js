@@ -520,7 +520,12 @@ test("Installer cancellation aborts the download, cleans staging and frees the e
     const busy = await installer.install("tool");
     assert.equal(busy.code, "INSTALL_BUSY");
     await startedPromise;
-    installer.cancel();
+    assert.equal(
+      installer.cancel("another-package"),
+      false,
+      "a stale cancel for another package must not abort this install",
+    );
+    assert.equal(installer.cancel("tool"), true);
     const result = await pending;
     assert.equal(result.success, false);
     assert.equal(result.code, "CANCELLED");

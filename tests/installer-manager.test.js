@@ -210,7 +210,7 @@ test("Installer IPC is wired into the app, the window and the preload", () => {
   assert.match(window, /this\.app\.installer\?\.handleIPC\(this\.ipc\);/);
   assert.match(preload, /installer: \{/);
   assert.match(preload, /ipcRenderer\.invoke\("Installer:install", \{ packageId \}\)/);
-  assert.match(preload, /ipcRenderer\.invoke\("Installer:cancel"\)/);
+  assert.match(preload, /ipcRenderer\.invoke\("Installer:cancel", \{ packageId \}\)/);
   assert.match(preload, /ipcRenderer\.invoke\("Installer:installation", \{ packageId \}\)/);
   assert.match(preload, /ipcRenderer\.invoke\("Installer:uninstall", \{ packageId \}\)/);
   assert.match(preload, /ipcRenderer\.on\("Installer:progress", listener\)/);

@@ -683,6 +683,7 @@ export class FileManager {
     this.ipc.handle(
       "FileManager:revealInExplorer",
       async (event, targetPath: string) => {
+        if (!validPath(targetPath)) return { success: false, code: "INVALID_PATH" };
         shell.showItemInFolder(targetPath);
         return { success: true };
       },
@@ -691,6 +692,7 @@ export class FileManager {
     this.ipc.handle(
       "FileManager:pathExists",
       async (event, targetPath: string) => {
+        if (!validPath(targetPath)) return false;
         return fsSync.existsSync(targetPath);
       },
     );

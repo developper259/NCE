@@ -51,6 +51,7 @@ export class Installer {
   private readonly platform: InstallerPlatform;
   private readonly arch: InstallerArchitecture;
   private active: AbortController | null = null;
+  private activePackageId: string | null = null;
 
   constructor(options: InstallerOptions) {
     this.userDataPath = options.userDataPath;
@@ -59,8 +60,16 @@ export class Installer {
     this.arch = options.arch ?? (process.arch as InstallerArchitecture);
   }
 
-  cancel(): void {
-    this.active?.abort();
+  /**
+   * Cancel the running install. When a package id is supplied, a mismatched
+   * request is ignored so a stale UI action cannot abort another package's
+   * installation.
+   */
+  cancel(packageId?: string): boolean {
+    if (!this.active) return false;
+    if (packageId && packageId !== this.activePackageId) return false;
+    this.active.abort();
+    return true;
   }
 
   async install(packageId: string, options: InstallOptions = {}): Promise<InstallResult> {
@@ -68,6 +77,7 @@ export class Installer {
       return { success: false, packageId, code: "INSTALL_BUSY", error: "Another installation is already running." };
     const controller = new AbortController();
     this.active = controller;
+    this.activePackageId = packageId;
     const onExternalAbort = () => controller.abort();
     options.signal?.addEventListener("abort", onExternalAbort, { once: true });
     if (options.signal?.aborted) controller.abort();
@@ -188,6 +198,7 @@ export class Installer {
     } finally {
       options.signal?.removeEventListener("abort", onExternalAbort);
       this.active = null;
+      this.activePackageId = null;
       if (stagingDir) await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
     }
   }
