@@ -573,6 +573,67 @@ test("settings changes reset sessions and respect disabled servers", { timeout: 
   }
 });
 
+test("changing one server's settings keeps unrelated sessions alive", { timeout: 30_000 }, async () => {
+  const workspace = await createWorkspace();
+  const documentPath = await fs.realpath(path.join(workspace, "main.ts"));
+  let settings = {
+    enabled: true,
+    servers: {
+      "typescript-language-server": {
+        enabled: true,
+        path: process.execPath,
+        args: [fakeServer, "typescript-language-server"],
+      },
+      "eslint-language-server": {
+        enabled: true,
+        path: process.execPath,
+        args: [fakeServer, "second-server"],
+      },
+    },
+  };
+  const { manager } = createManager(workspace, { getSettings: () => settings });
+  try {
+    assert.equal((await manager.openDocument({
+      path: documentPath,
+      text: "const value = 1;\n",
+    })).success, true);
+    await waitFor(async () => {
+      const status = await manager.getStatus();
+      return status.sessions.filter((session) => session.state === "ready").length === 2;
+    });
+
+    // Change only ESLint's arguments. The TypeScript server has nothing to do
+    // with that setting and must keep its existing session.
+    settings = {
+      enabled: true,
+      servers: {
+        ...settings.servers,
+        "eslint-language-server": {
+          enabled: true,
+          path: process.execPath,
+          args: [fakeServer, "second-server", "changed"],
+        },
+      },
+    };
+    await manager.refreshSettings();
+
+    const hover = await manager.hover({
+      path: documentPath,
+      position: { line: 0, character: 0 },
+    });
+    assert.equal(hover.success, true, "the unchanged server must still answer");
+    assert.match(hover.hover.contents, /typescript-language-server/);
+    const status = await manager.getStatus();
+    assert.equal(
+      status.sessions.find((session) => session.serverId === "typescript-language-server")?.state,
+      "ready",
+    );
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test("LSP manager answers server-initiated requests and validates payloads", { timeout: 30_000 }, async () => {
   const workspace = await createWorkspace();
   const documentPath = await fs.realpath(path.join(workspace, "main.ts"));

@@ -215,7 +215,7 @@ test("a workspace reset during opening leaves no stale document behind", async (
   }
 });
 
-test("a document opened before a reset is not attached to the new session", async () => {
+test("a document stays usable across a settings refresh", async () => {
   const workspace = await createWorkspace();
   const documentPath = await fs.realpath(path.join(workspace, "main.py"));
   const { manager } = createManager(workspace);
@@ -228,16 +228,8 @@ test("a document opened before a reset is not attached to the new session", asyn
 
     await manager.refreshSettings();
 
-    // After the reset the store is empty: the old document must not be reused.
-    const completion = await manager.completion({
-      path: documentPath,
-      position: { line: 0, character: 0 },
-    });
-    assert.equal(completion.success, false);
-    assert.equal(completion.code, "LSP_DOCUMENT_NOT_OPEN");
-
-    // Re-synchronizing works and completion succeeds again.
-    await manager.openDocument({ path: documentPath, text: "import os\n" });
+    // A settings change must not lose the user's open documents: the server
+    // restarts, but the document is re-synchronized automatically.
     const retried = await waitFor(async () => {
       const result = await manager.completion({
         path: documentPath,

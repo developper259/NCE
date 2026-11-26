@@ -205,24 +205,62 @@ export class LspManager {
 
   async refreshSettings(): Promise<void> {
     if (this.disposed) return;
+    // A settings change is broadcast to every window. Restarting every server
+    // in every window would kill healthy sessions that have nothing to do with
+    // the changed setting. Recompute each live session's resolution and only
+    // restart the ones that actually changed.
+    const settings = this.settings();
     this.resolutions.clear();
-    this.generation += 1;
-    const sessions = [...this.sessions.values()];
-    this.sessions.clear();
-    this.sessionSources.clear();
-    this.associations.clear();
-    this.pending.clear();
-    this.attempts.clear();
-    this.actionTokens.clear();
-    this.completionTokens.clear();
-    this.rejectPendingApplyEdits("The language workspace changed.");
-    this.documents.clear();
-    this.diagnostics.clearAll();
-    await Promise.allSettled(sessions.map((session) => session.stop()));
-    if (this.disposed) return;
-    this.emitReset();
-    this.emitDiagnostics();
+    const doomed: Array<[string, LspSession]> = [];
+    for (const [key, session] of this.sessions) {
+      const definition = getServerDefinition(session.serverId);
+      if (!definition) {
+        doomed.push([key, session]);
+        continue;
+      }
+      const previous = this.sessionSources.get(key);
+      const next = await this.resolveExecutable(definition, settings);
+      if (this.disposed) return;
+      if (!next.available || !this.serverEnabled(definition, settings) ||
+          !this.sameResolution(previous, next)) {
+        doomed.push([key, session]);
+      }
+    }
+    if (doomed.length) {
+      this.generation += 1;
+      for (const [key] of doomed) {
+        this.sessions.delete(key);
+        this.sessionSources.delete(key);
+        this.attempts.delete(key);
+        this.pending.delete(key);
+        this.forgetAssociations(key);
+        this.diagnostics.clearServer(key);
+      }
+      this.rejectPendingApplyEdits("The language server settings changed.");
+      await Promise.allSettled(doomed.map(([, session]) => session.stop()));
+      if (this.disposed) return;
+      // Only tell the renderer to drop state for the sessions that actually
+      // changed; unrelated servers keep their diagnostics and documents.
+      this.emitReset();
+      this.emitDiagnostics();
+      // The renderer's reset drops every document, so re-synchronize all of
+      // them. attachOpenDocuments is idempotent: sessions that were not
+      // restarted already hold their associations and get no second didOpen.
+      await this.attachOpenDocuments([...getServerDefinitions()]);
+    }
     void this.emitStatus();
+  }
+
+  private sameResolution(
+    previous: LspExecutableResolution | undefined,
+    next: LspExecutableResolution,
+  ): boolean {
+    if (!previous) return false;
+    return previous.available === next.available &&
+      previous.command === next.command &&
+      previous.source === next.source &&
+      JSON.stringify(previous.args) === JSON.stringify(next.args) &&
+      JSON.stringify(previous.initializationOptions ?? {}) === JSON.stringify(next.initializationOptions ?? {});
   }
 
   async dispose(): Promise<void> {
@@ -1192,8 +1230,9 @@ export class LspManager {
           void this.emitStatus();
         },
         onDiagnostics: (serverKey, uri, version, diagnostics) => {
-          if (serverKey !== key || this.sessions.get(key) === undefined) return;
-          void this.handleDiagnostics(serverKey, uri, version, diagnostics);
+          const owner = this.sessions.get(key);
+          if (serverKey !== key || !owner) return;
+          void this.handleDiagnostics(serverKey, uri, version, diagnostics, owner);
         },
         onLog: (serverKey, level, message) => {
           this.options.onLog?.(serverKey, level, message);
@@ -1572,6 +1611,7 @@ export class LspManager {
     uri: string,
     version: number | null,
     diagnostics: LspDiagnostic[],
+    owner: LspSession,
   ): Promise<void> {
     if (this.disposed) return;
     const uriPath = uriToPath(uri);
@@ -1590,7 +1630,9 @@ export class LspManager {
     // session that no longer exists, which is exactly the state teardown is
     // trying to clear. The check is repeated after the awaits above because a
     // teardown can land while this handler is resolving the document path.
-    if (!this.sessions.has(serverKey)) return;
+    // Identity, not just presence: a replacement session can occupy the same
+    // key while an old notification is still resolving its document path.
+    if (this.sessions.get(serverKey) !== owner) return;
     if (version !== null && version > document.version) return;
     if (!this.diagnostics.publish(uri, serverKey, version, diagnostics)) return;
     this.emitDiagnostics();
