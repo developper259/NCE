@@ -24,6 +24,11 @@ const languageView = {
   id: "python",
   name: "Python",
   description: "Python language",
+  summary: "Tout le nécessaire pour coder en Python dans NCE.",
+  benefits: [
+    { title: "Exécuter vos programmes", description: "Lancez vos fichiers et projets Python.", icon: "fi-rr-code-simple" },
+    { title: "Aide à l'écriture", description: "Suggestions de code, détection des erreurs et navigation.", icon: "fi-rr-sparkles" },
+  ],
   categories: ["language"],
   icon: "fi fi-brands-python",
   fileExtensions: [".py"],
@@ -155,8 +160,8 @@ test("the catalog lists the language without its language-server package", async
     "the footer only counts visible packages");
 
   manager.openDetail("python");
-  assert.ok(byFocusKey(manager.main, "vm-component-python.lsp"),
-    "the language server is still available inside the language detail");
+  assert.ok(textOf(manager.main).includes("Inclus dans cette installation"),
+    "the language detail presents the environment, not individual packages");
 });
 
 test("JavaScript and TypeScript share one language detail", async () => {
@@ -193,47 +198,57 @@ test("JavaScript and TypeScript share one language detail", async () => {
   byFocusKey(manager.main, "vm-details-node").click();
   const text = textOf(manager.main);
   assert.match(text, /JavaScript & TypeScript/);
-  // One detail page carries all three components, including the compiler that
-  // used to live behind its own card.
-  assert.ok(byFocusKey(manager.main, "vm-component-javascript.runtime"));
-  assert.ok(byFocusKey(manager.main, "vm-component-javascript.typescript"));
-  assert.ok(byFocusKey(manager.main, "vm-component-javascript.lsp"));
+  // One environment, one action: the compiler and language server are part of
+  // the same grouped install and no longer appear as separate choices.
+  assert.equal(walk(manager.main, (node) => node.tagName === "input" && node.type === "checkbox").length, 0);
+  assert.ok(byFocusKey(manager.main, "vm-apply-components-javascript"));
 });
 
-test("language detail renders one checkbox per component with version metadata", async () => {
+test("language detail shows one centred environment with plain benefits", async () => {
   const { document, manager } = setup();
   await manager.show();
   await flush();
   manager.openDetail("python");
-  const checkboxes = walk(document.body, (node) => node.tagName === "input" && node.type === "checkbox");
-  assert.equal(checkboxes.length, 2);
-  assert.deepEqual(checkboxes.map((box) => box.dataset.focusKey).sort(), [
-    "vm-component-python.lsp", "vm-component-python.runtime",
-  ]);
-  assert.ok(checkboxes.every((box) => box.checked));
-  const text = walk(document.body, (node) => node.textContent).map((node) => node.textContent).join(" ");
-  assert.match(text, /3\.12\.16/);
-  assert.match(text, /1\.1\.414/);
-  assert.match(text, /Install 2/);
+  const text = textOf(document.body);
+  assert.match(text, /Python/);
+  assert.match(text, /Inclus dans cette installation/);
+  assert.match(text, /Exécuter vos programmes/);
+  assert.match(text, /Aide à l'écriture/);
+  assert.match(text, /Installer Python/);
+  assert.equal(walk(document.body, (node) => node.tagName === "input" && node.type === "checkbox").length, 0);
   assert.ok(byFocusKey(document.body, "vm-apply-components-python"));
 });
 
-test("toggling a checkbox updates the selection and recomputes the plan", async () => {
-  const { document, manager, calls } = setup();
+test("technical component names stay out of the main presentation", async () => {
+  const { document, manager } = setup();
   await manager.show();
   await flush();
   manager.openDetail("python");
-  const lsp = byFocusKey(document.body, "vm-component-python.lsp");
-  lsp.checked = false;
-  lsp.dispatch("change");
-  await flush();
-  assert.deepEqual(Array.from(manager.selectionFor("python")), ["python.runtime"]);
-  assert.ok(calls.views.length >= 2);
-  const last = calls.views[calls.views.length - 1];
-  assert.deepEqual(Array.from(last.selected), ["python.runtime"]);
+  const header = walk(document.body, (node) =>
+    node.className && String(node.className).includes("nce-vm-env-header"))[0];
+  const benefits = walk(document.body, (node) =>
+    node.className && String(node.className).includes("nce-vm-env-benefits"))[0];
+  const visible = textOf(header) + " " + textOf(benefits);
+  for (const term of ["Runtime", "LSP", "Language Server", "Package", "python.runtime", "python.lsp"])
+    assert.equal(visible.includes(term), false, `${term} must not appear in the presentation`);
 });
 
-test("Apply sends the selected component ids to the main process", async () => {
+test("technical details are available in a collapsed section", async () => {
+  const { document, manager } = setup();
+  await manager.show();
+  await flush();
+  manager.openDetail("python");
+  const toggle = byFocusKey(document.body, "vm-env-details-python");
+  assert.ok(toggle);
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  toggle.dispatch("click");
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  const text = textOf(document.body);
+  assert.match(text, /3\.12\.16/);
+  assert.match(text, /1\.1\.414/);
+});
+
+test("the single action installs every recommended component at once", async () => {
   const { document, manager, calls } = setup();
   await manager.show();
   await flush();
@@ -274,72 +289,82 @@ test("applying a language never reuses another language's selection", async () =
   manager.state.componentSelection.delete("python");
 
   manager.openDetail("python");
-  const apply = byFocusKey(document.body, "vm-apply-components-python");
-  apply.click();
+  // The guard lives in applyLanguageComponents; the grouped action deliberately
+  // rebuilds the selection, so call the guarded path directly here.
+  await manager.applyLanguageComponents("python");
   await flush();
 
   assert.equal(calls.apply.length, 0, "nothing may be applied without a real selection");
   assert.ok(manager.state.confirmation, "the user is told the view is still loading");
 });
 
-test("applying a language sends only that language's selection", async () => {
-  const { document, manager, calls } = setup({
-    languages: [{ id: "python", name: "Python" }, { id: "javascript", name: "JavaScript" }],
-    views: { python: languageView, javascript: javascriptLanguageView() },
-  });
+test("the single action resets the selection to the full recommended set", async () => {
+  const { document, manager, calls } = setup();
   await manager.show();
   await flush();
-
-  manager.state.componentSelection.set("javascript", new Set(["javascript.runtime"]));
-  manager.state.componentSelection.set("python", new Set(["python.lsp"]));
-
+  // A stale partial selection must not produce a partial environment.
+  manager.state.setSelection("python", ["python.lsp"]);
   manager.openDetail("python");
   byFocusKey(document.body, "vm-apply-components-python").click();
   await flush();
+  assert.deepEqual(Array.from(calls.apply[0].selected).sort(), ["python.lsp", "python.runtime"]);
+});
 
+test("uninstalling a language asks first and removes the whole environment", async () => {
+  const installed = {
+    ...languageView,
+    plan: { ...languageView.plan, toInstall: [], unchanged: ["python.runtime", "python.lsp"] },
+  };
+  const { document, manager, calls } = setup({ views: { python: installed } });
+  await manager.show();
+  await flush();
+  manager.openDetail("python");
+
+  const text = textOf(document.body);
+  assert.match(text, /Installé/);
+  assert.match(text, /Désinstaller Python/);
+
+  byFocusKey(document.body, "vm-uninstall-language-python").click();
+  assert.ok(byFocusKey(document.body, "vm-confirm-uninstall-language-python"));
+  assert.equal(calls.apply.length, 0, "nothing is removed before confirmation");
+
+  byFocusKey(document.body, "vm-confirm-uninstall-language-python").click();
+  await flush();
   assert.equal(calls.apply.length, 1);
-  assert.equal(calls.apply[0].languageId, "python");
-  assert.deepEqual(Array.from(calls.apply[0].selected), ["python.lsp"]);
+  assert.deepEqual(Array.from(calls.apply[0].selected), []);
 });
 
-test("a component scheduled for install is not badged as installed", async () => {
-  // Regression: the runtime showed as "Installed" before anything had been
-  // downloaded, because the badge only checked the unchanged list and the plan
-  // summary said nothing about what was about to be installed.
-  const { document, manager } = setup();
+test("a partially installed environment is never reported as complete", async () => {
+  const partial = {
+    ...languageView,
+    plan: { ...languageView.plan, toInstall: ["python.lsp"], unchanged: ["python.runtime"] },
+  };
+  const { document, manager } = setup({ views: { python: partial } });
   await manager.show();
   await flush();
   manager.openDetail("python");
-
   const text = textOf(document.body);
-  const runtimeRow = walk(document.body, (node) =>
-    node.className && String(node.className).includes("nce-vm-component-row") &&
-    textOf(node).includes("Python Runtime"))[0];
-  assert.ok(runtimeRow, "the runtime row is rendered");
-  assert.equal(
-    textOf(runtimeRow).includes("Installed"),
-    false,
-    "a component that is only scheduled must not claim to be installed",
-  );
-  assert.ok(text.includes("Will install"), "the plan names what will be installed");
+  assert.match(text, /Installation partielle/);
+  assert.equal(text.includes("Installé"), false);
+  assert.ok(byFocusKey(document.body, "vm-apply-components-python"));
 });
 
-test("a dependency pulled in by a selection is marked as required", async () => {
-  const { document, manager } = setup({
-    views: {
-      python: {
-        ...languageView,
-        selected: ["python.lsp"],
-        requiredBySelection: ["python.runtime"],
-      },
-    },
-  });
+test("a blocked environment offers a repair action", async () => {
+  const blocked = {
+    ...languageView,
+    plan: { ...languageView.plan, blockers: ["A component is unavailable"] },
+  };
+  const { document, manager, calls } = setup({ views: { python: blocked } });
   await manager.show();
   await flush();
   manager.openDetail("python");
-
   const text = textOf(document.body);
-  assert.ok(text.includes("Required by your selection"));
+  assert.match(text, /Installation incomplète/);
+  const repair = byFocusKey(document.body, "vm-apply-components-python");
+  assert.match(textOf(repair), /Réparer Python/);
+  repair.click();
+  await flush();
+  assert.equal(calls.apply.length, 1);
 });
 
 test("component operations are surfaced while a plan runs", async () => {

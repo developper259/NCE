@@ -345,6 +345,40 @@ class VersionManager {
     return null;
   }
 
+  /**
+   * Install every component recommended for a language in one grouped apply.
+   * The selection is reset to the view's defaults so a half-configured
+   * selection can never produce a partial environment.
+   */
+  async installFullLanguage(languageId) {
+    const view = this.languageViews.get(languageId);
+    if (!view) return;
+    const defaults = (view.components || [])
+      .filter((component) => component.defaultSelected !== false && component.supported !== false)
+      .map((component) => component.id);
+    this.state.setSelection(languageId, defaults);
+    return this.applyLanguageComponents(languageId);
+  }
+
+  /** Ask before removing a whole language environment. */
+  askUninstallLanguage(languageId) {
+    this.confirmation = { kind: "uninstall-language", languageId };
+    this.renderMain();
+    this.focusByKey(`vm-confirm-uninstall-language-${languageId}`);
+  }
+
+  /**
+   * Remove every installed component of the language through the existing
+   * grouped apply path. Dependencies still used by another language are kept
+   * by the planner, so this never breaks a neighbouring environment.
+   */
+  async confirmUninstallLanguage(languageId) {
+    this.confirmation = null;
+    if (this.languageApplying || typeof this.api?.applyComponents !== "function") return;
+    this.state.setSelection(languageId, []);
+    await this.applyLanguageComponents(languageId);
+  }
+
   async applyLanguageComponents(languageId) {
     if (this.languageApplying || typeof this.api?.applyComponents !== "function") return;
     // The selection must belong to the language being applied. A view that has
@@ -352,6 +386,8 @@ class VersionManager {
     // stored for another language would apply the wrong plan: installing
     // JavaScript components while the user was looking at Python.
     const selected = this.state.selectionFor(languageId);
+    // An empty set is a valid selection: it is how a whole environment is
+    // uninstalled. Only a missing entry means the view has not loaded yet.
     if (!selected) {
       this.state.confirmation = {
         message: "This language is still loading. Try again in a moment.",

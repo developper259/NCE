@@ -1,215 +1,227 @@
 /**
- * Unified language detail page.
+ * Language environment detail page.
  *
- * Uses the same header, section, information-row and component-row building
- * blocks as a plain package. Components are the one structural difference of
- * an environment. Selection, planning and apply stay entirely in the manager
- * and its services; this module only renders them.
+ * Presents one language as a single installable environment: a short header,
+ * the concrete benefits of the environment, useful secondary information and
+ * one primary action. Internal components, their versions and their dependency
+ * plan stay in the model and in the optional details disclosure; they are never
+ * presented as choices the user has to make.
+ *
+ * Installation still goes through the existing grouped component apply path.
+ * This module only renders data and delegates actions to the manager.
  */
 class VersionManagerLanguageDetail {
   static render(manager, languageId) {
     const view = manager.languageViews.get(languageId);
     if (!view) return null;
     const fragment = document.createDocumentFragment();
-    const page = VersionManagerUI.element("div", "nce-vm-detail-page");
+    const page = VersionManagerUI.element("div", "nce-vm-env-page");
 
-    page.appendChild(VersionManagerUI.button("Back", () => manager.closeDetail(), {
-      className: "nce-vm-back",
+    page.appendChild(VersionManagerUI.button("Retour", () => manager.closeDetail(), {
+      className: "nce-vm-back nce-vm-env-back",
       icon: "fi-rr-arrow-small-left",
       focusKey: "vm-back",
     }));
 
     page.appendChild(VersionManagerLanguageDetail.header(manager, view));
-
-    const components = VersionManagerLanguageDetail.componentsSection(manager, languageId, view);
-    if (components) page.appendChild(components);
-
-    const information = VersionManagerLanguageDetail.informationSection(manager, languageId, view);
-    if (information) page.appendChild(information);
+    page.appendChild(VersionManagerLanguageDetail.benefits(view));
+    page.appendChild(VersionManagerLanguageDetail.progress(manager, languageId));
+    page.appendChild(VersionManagerLanguageDetail.action(manager, view));
+    page.appendChild(VersionManagerLanguageDetail.details(view));
 
     fragment.appendChild(page);
     return fragment;
   }
 
+  /** A. Header: discreet navigation, language icon, name, summary and state. */
   static header(manager, view) {
-    const header = VersionManagerUI.element("div", "nce-vm-detail-header");
+    const header = VersionManagerUI.element("header", "nce-vm-env-header");
 
-    const icon = VersionManagerUI.element("span", "nce-vm-detail-icon");
-    icon.appendChild(VersionManagerUI.icon(view.icon));
+    const icon = VersionManagerUI.element("span", "nce-vm-env-icon");
+    icon.appendChild(VersionManagerUI.icon(view.icon || "fi-rr-code-simple"));
     header.appendChild(icon);
 
-    const titles = VersionManagerUI.element("div", "nce-vm-detail-titles");
-    const nameRow = VersionManagerUI.element("div", "nce-vm-detail-name-row");
-    nameRow.append(
-      VersionManagerUI.element("h3", "nce-vm-detail-name", view.name),
-      VersionManagerUI.categoryTag("language"),
-      VersionManagerUI.badge(VersionManagerLanguageDetail.environmentState(view)),
-    );
-    titles.appendChild(nameRow);
-    if (view.description) {
-      titles.appendChild(VersionManagerUI.element("p", "nce-vm-detail-description", view.description));
-    }
+    const titles = VersionManagerUI.element("div", "nce-vm-env-titles");
+    titles.appendChild(VersionManagerUI.element("h3", "nce-vm-env-name", view.name));
+    const summary = view.summary || view.description;
+    if (summary) titles.appendChild(VersionManagerUI.element("p", "nce-vm-env-summary", summary));
     header.appendChild(titles);
 
-    const applyLabel = manager.languageApplying === view.id
-      ? "Applying…"
-      : `Apply changes${VersionManagerLanguageDetail.actionCount(view.plan) ? ` (${VersionManagerLanguageDetail.actionCount(view.plan)})` : ""}`;
-    const apply = VersionManagerUI.button(applyLabel, () => manager.applyLanguageComponents(view.id), {
-      className: "nce-vm-button nce-vm-button-primary",
-      icon: "fi-rr-check",
-      focusKey: `vm-apply-components-${view.id}`,
-      disabled: manager.languageApplying === view.id || (view.plan?.blockers?.length || 0) > 0,
-    });
-    header.appendChild(VersionManagerUI.actionArea([apply]));
+    const state = VersionManagerLanguageDetail.environmentState(view);
+    const status = VersionManagerUI.element("span", `nce-vm-env-status nce-vm-env-status-${state.state}`);
+    status.appendChild(VersionManagerUI.icon(state.icon));
+    status.appendChild(VersionManagerUI.element("span", null, state.label));
+    header.appendChild(status);
     return header;
   }
 
-  static actionCount(plan) {
-    if (!plan) return 0;
-    return (plan.toInstall?.length || 0) + (plan.toUninstall?.length || 0);
-  }
-
-  /** Environment status is derived from the real component plan, never invented. */
+  /**
+   * Environment state, derived from the real component plan and the running
+   * operation. A partially installed environment is never reported as complete.
+   */
   static environmentState(view) {
     const plan = view.plan;
-    if (!plan) return "unknown";
-    if ((plan.blockers?.length || 0) > 0) return "failed";
-    if ((plan.toInstall?.length || 0) > 0 || (plan.toUninstall?.length || 0) > 0) return "available";
-    if ((plan.unchanged?.length || 0) > 0) return "installed";
-    return "not-installed";
+    if (!plan) return { state: "unknown", label: "Chargement…", icon: "fi-rr-info" };
+    if ((plan.blockers?.length || 0) > 0) {
+      return { state: "error", label: "Installation incomplète", icon: "fi-rr-triangle-warning" };
+    }
+    const total = (view.components || []).length;
+    const done = (plan.unchanged || []).length;
+    if (done > 0 && done < total) {
+      return { state: "partial", label: "Installation partielle", icon: "fi-rr-triangle-warning" };
+    }
+    if (done === total && total > 0) {
+      return { state: "installed", label: "Installé", icon: "fi-rr-check-double" };
+    }
+    return { state: "available", label: "Disponible", icon: "fi-rr-download" };
   }
 
-  static componentsSection(manager, languageId, view) {
-    if (!view.components?.length) return null;
-    const section = VersionManagerUI.element("section", "nce-vm-detail-section");
-    section.appendChild(VersionManagerUI.sectionHeader(
-      "Components",
-      "Select the components you want. NCE compares your selection with what is installed and performs only the needed operations.",
+  /** B. Benefits: a plain list, never a grid of cards. */
+  static benefits(view) {
+    const section = VersionManagerUI.element("section", "nce-vm-env-benefits");
+    section.appendChild(VersionManagerUI.element(
+      "h4", "nce-vm-env-section-title", "Inclus dans cette installation",
     ));
-
-    const selection = manager.selectionFor(languageId) || new Set(view.selected || []);
-    const list = VersionManagerUI.element("div", "nce-vm-component-list");
-    for (const component of view.components) {
-      list.appendChild(VersionManagerLanguageDetail.componentRow(manager, languageId, component, selection, view.plan, view.requiredBySelection));
+    const list = VersionManagerUI.element("ul", "nce-vm-env-benefit-list");
+    const items = view.benefits?.length
+      ? view.benefits
+      : (view.components || []).map((component) => ({
+        title: component.name,
+        description: component.description,
+        icon: "fi-rr-check",
+      }));
+    for (const benefit of items) {
+      const item = VersionManagerUI.element("li", "nce-vm-env-benefit");
+      const icon = VersionManagerUI.element("span", "nce-vm-env-benefit-icon");
+      icon.appendChild(VersionManagerUI.icon(benefit.icon || "fi-rr-check"));
+      item.appendChild(icon);
+      const body = VersionManagerUI.element("div", "nce-vm-env-benefit-body");
+      body.appendChild(VersionManagerUI.element("span", "nce-vm-env-benefit-title", benefit.title));
+      if (benefit.description) {
+        body.appendChild(VersionManagerUI.element("span", "nce-vm-env-benefit-desc", benefit.description));
+      }
+      item.appendChild(body);
+      list.appendChild(item);
     }
     section.appendChild(list);
-    section.appendChild(VersionManagerLanguageDetail.planSummary(view.plan, view));
-    section.appendChild(VersionManagerLanguageDetail.progressSection(manager, languageId));
     return section;
   }
 
-  /** Live progress for the components of this language, newest last. */
-  static progressSection(manager, languageId) {
+  /** C. Secondary information: version and state, with technical details folded away. */
+  static details(view) {
+    const section = VersionManagerUI.element("section", "nce-vm-env-details");
+    const toggle = VersionManagerUI.element("button", "nce-vm-env-details-toggle");
+    toggle.type = "button";
+    toggle.dataset.focusKey = `vm-env-details-${view.id}`;
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.append(
+      VersionManagerUI.icon("fi-rr-angle-small-right"),
+      VersionManagerUI.element("span", null, "Détails"),
+    );
+    toggle.addEventListener("click", () => {
+      const open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!open));
+      panel.hidden = open;
+    });
+    section.appendChild(toggle);
+
+    const panel = VersionManagerUI.element("div", "nce-vm-env-details-panel");
+    panel.hidden = true;
+    const rows = VersionManagerUI.element("div", "nce-vm-info-list");
+    const versions = (view.components || [])
+      .filter((component) => component.installableVersion && component.installableVersion !== "—")
+      .map((component) => `${component.name} ${component.installableVersion}`);
+    if (versions.length) rows.appendChild(VersionManagerUI.informationRow("Versions", versions.join(", ")));
+    if (view.fileExtensions?.length) {
+      rows.appendChild(VersionManagerUI.informationRow("Fichiers pris en charge", view.fileExtensions.join(", ")));
+    }
+    panel.appendChild(rows);
+    section.appendChild(panel);
+    return section;
+  }
+
+  /** D. One primary action. It applies the full recommended environment. */
+  static action(manager, view) {
+    const wrap = VersionManagerUI.element("div", "nce-vm-env-action");
+    const applying = manager.languageApplying === view.id;
+    const plan = view.plan;
+    const complete = VersionManagerLanguageDetail.environmentState(view).state === "installed";
+    const blocked = (plan?.blockers?.length || 0) > 0;
+
+    let button;
+    if (applying) {
+      button = VersionManagerUI.element("div", "nce-vm-env-working");
+      button.setAttribute("role", "status");
+      button.append(
+        VersionManagerUI.icon("fi-rr-refresh"),
+        VersionManagerUI.element("span", null, "Installation en cours…"),
+      );
+    } else if (blocked) {
+      button = VersionManagerUI.button(`Réparer ${view.name}`, () => manager.installFullLanguage(view.id), {
+        className: "nce-vm-button nce-vm-button-primary",
+        icon: "fi-rr-refresh",
+        focusKey: `vm-apply-components-${view.id}`,
+      });
+    } else if (complete) {
+      button = VersionManagerUI.button(`Désinstaller ${view.name}`, () => manager.askUninstallLanguage(view.id), {
+        className: "nce-vm-button",
+        icon: "fi-rr-trash",
+        focusKey: `vm-uninstall-language-${view.id}`,
+      });
+    } else {
+      button = VersionManagerUI.button(`Installer ${view.name}`, () => manager.installFullLanguage(view.id), {
+        className: "nce-vm-button nce-vm-button-primary",
+        icon: "fi-rr-download",
+        focusKey: `vm-apply-components-${view.id}`,
+      });
+    }
+    wrap.appendChild(button);
+
+    if (manager.confirmation?.kind === "uninstall-language" && manager.confirmation.languageId === view.id) {
+      wrap.appendChild(VersionManagerLanguageDetail.uninstallConfirmation(manager, view));
+    }
+    return wrap;
+  }
+
+  static uninstallConfirmation(manager, view) {
+    const confirm = VersionManagerUI.element("div", "nce-vm-confirm nce-vm-env-confirm");
+    confirm.setAttribute("role", "alertdialog");
+    confirm.setAttribute("aria-label", `Confirmer la désinstallation de ${view.name}`);
+    confirm.appendChild(VersionManagerUI.element(
+      "p", "nce-vm-confirm-title", `Désinstaller ${view.name} ?`,
+    ));
+    confirm.appendChild(VersionManagerUI.element(
+      "p", "nce-vm-confirm-text",
+      "Les outils nécessaires aux autres langages installés sont conservés.",
+    ));
+    const actions = VersionManagerUI.element("div", "nce-vm-confirm-actions");
+    actions.append(
+      VersionManagerUI.button("Désinstaller", () => manager.confirmUninstallLanguage(view.id), {
+        className: "nce-vm-button nce-vm-button-danger",
+        focusKey: `vm-confirm-uninstall-language-${view.id}`,
+      }),
+      VersionManagerUI.button("Annuler", () => manager.cancelConfirmation(), {
+        focusKey: `vm-cancel-uninstall-language-${view.id}`,
+      }),
+    );
+    confirm.appendChild(actions);
+    return confirm;
+  }
+
+  /** Progress messages, translated from component events to plain language. */
+  static progress(manager, languageId) {
     const events = typeof manager.applyEventsFor === "function"
       ? manager.applyEventsFor(languageId)
       : [];
-    const box = VersionManagerUI.element("div", "nce-vm-lang-progress");
+    const box = VersionManagerUI.element("div", "nce-vm-env-progress");
     if (!events.length) return box;
-    for (const event of events.slice(-8)) {
-      const line = VersionManagerUI.element(
-        "div",
-        `nce-vm-lang-progress-line nce-vm-lang-progress-${event.state || "info"}`,
-      );
-      line.textContent = event.message || `${event.componentId} ${event.state || ""}`;
-      box.appendChild(line);
-    }
+    const latest = events[events.length - 1];
+    const line = VersionManagerUI.element(
+      "p", `nce-vm-env-progress-line nce-vm-env-progress-${latest.state || "info"}`,
+      latest.message || "Installation en cours…",
+    );
+    line.setAttribute("role", "status");
+    box.appendChild(line);
     return box;
-  }
-
-  static componentRow(manager, languageId, component, selection, plan, requiredBySelection) {
-    const required = (requiredBySelection || []).includes(component.id);
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.className = "nce-vm-component-checkbox";
-    // A dependency pulled in by a selected component is shown as required: it
-    // is part of the plan, but it is not the user's choice to make here.
-    checkbox.checked = selection.has(component.id) || required;
-    checkbox.disabled = !component.supported || required;
-    checkbox.dataset.focusKey = `vm-component-${component.id}`;
-    checkbox.addEventListener("change", () => {
-      manager.toggleLanguageComponent(languageId, component.id, checkbox.checked);
-    });
-
-    const metaParts = [`Version ${component.installableVersion}`];
-    if (!component.supported) metaParts.push("Not available on this platform");
-    if (required) metaParts.push("Required by your selection");
-
-    // A component is only "installed" when it really is. A dependency that is
-    // merely scheduled for installation is not installed yet, and saying so
-    // before anything was downloaded was actively misleading.
-    let badge = null;
-    if (plan) {
-      if ((plan.unchanged || []).includes(component.id)) badge = VersionManagerUI.badge("installed");
-      else if ((plan.toInstall || []).includes(component.id)) badge = VersionManagerUI.badge("available");
-      else if ((plan.toUninstall || []).includes(component.id)) badge = VersionManagerUI.badge("not-installed");
-    }
-
-    const row = VersionManagerUI.componentRow(component, {
-      selectionControl: checkbox,
-      badge,
-      meta: metaParts.join(" · "),
-    });
-    return row;
-  }
-
-  static planSummary(plan, view) {
-    const box = VersionManagerUI.element("div", "nce-vm-lang-plan");
-    const parts = [];
-    if (plan?.toInstall?.length) parts.push(`Install ${plan.toInstall.length}`);
-    if (plan?.toUninstall?.length) parts.push(`Uninstall ${plan.toUninstall.length}`);
-    if (!parts.length) parts.push("Already up to date");
-    box.appendChild(VersionManagerUI.element("span", "nce-vm-lang-plan-summary", parts.join(" · ")));
-    // Name what will be installed, so a dependency the user did not tick is
-    // never a surprise download.
-    const components = view?.components || [];
-    const names = (plan?.toInstall || [])
-      .map((id) => components.find((component) => component.id === id)?.name)
-      .filter(Boolean);
-    if (names.length)
-      box.appendChild(VersionManagerUI.element("span", "nce-vm-lang-plan-detail", `Will install: ${names.join(", ")}`));
-    for (const blocker of plan?.blockers || []) {
-      box.appendChild(VersionManagerUI.element("span", "nce-vm-lang-plan-blocker", blocker));
-    }
-    // Packages pulled in from outside this language must be announced, not
-    // discovered mid-download. Installing Pyright really does need Node.js.
-    for (const dependency of view?.packageDependencies || []) {
-      if (dependency.installed) continue;
-      box.appendChild(VersionManagerUI.element(
-        "span",
-        "nce-vm-lang-plan-dependency",
-        `${dependency.packageName} will also be installed: ${dependency.requiredBy} needs it.`,
-      ));
-    }
-    return box;
-  }
-
-  static informationSection(manager, languageId, view) {
-    const rows = VersionManagerUI.element("div", "nce-vm-info-list");
-
-    const packages = manager.snapshot?.packages || [];
-    const byId = new Map(packages.map((info) => [info.id, info]));
-    const installedCount = (view.components || []).filter((component) => {
-      const info = byId.get(component.packageId);
-      return info && (info.installations || []).length > 0;
-    }).length;
-    rows.appendChild(VersionManagerUI.informationRow(
-      "Installed components",
-      `${installedCount} of ${view.components.length}`,
-    ));
-
-    const versions = (view.components || [])
-      .filter((component) => component.installableVersion && component.installableVersion !== "—")
-      .map((component) => `${component.name}: ${component.installableVersion}`);
-    if (versions.length) {
-      rows.appendChild(VersionManagerUI.informationRow("Component versions", versions.join(", ")));
-    }
-    if (view.fileExtensions?.length) {
-      rows.appendChild(VersionManagerUI.informationRow("File extensions", view.fileExtensions.join(", ")));
-    }
-
-    const section = VersionManagerUI.element("section", "nce-vm-detail-section");
-    section.appendChild(VersionManagerUI.sectionHeader("Environment Information"));
-    section.appendChild(rows);
-    return section;
   }
 }
