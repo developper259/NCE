@@ -118,6 +118,8 @@ contextBridge.exposeInMainWorld("api", {
   versionManager: {
     getState: () => ipcRenderer.invoke("VersionManager:state"),
     refresh: () => ipcRenderer.invoke("VersionManager:refresh"),
+    removalCheck: (packageId) =>
+      ipcRenderer.invoke("VersionManager:removal-check", { packageId }),
     install: (packageId) =>
       ipcRenderer.invoke("VersionManager:install", { packageId }),
     uninstall: (installationId) =>

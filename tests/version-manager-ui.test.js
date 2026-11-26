@@ -1338,3 +1338,27 @@ test("every surface that opens a tab, sidebar or quick panel dismisses the Versi
     "the hook runs before the already-open early return",
   );
 });
+test("global component events are visible in every language panel", () => {
+  const { manager } = setup();
+  manager.state.languageViews.set("python", { components: [{ id: "pyright" }] });
+  manager.applyEvents.push({
+    type: "component-operation",
+    componentId: "",
+    packageId: "",
+    kind: "install",
+    state: "failed",
+    message: "Another component operation is already running.",
+  });
+  manager.applyEvents.push({
+    type: "component-operation",
+    componentId: "other",
+    packageId: "other",
+    kind: "install",
+    state: "completed",
+    message: "unrelated component",
+  });
+
+  const events = manager.applyEventsFor("python");
+  assert.equal(events.length, 1, "the global refusal is not filtered out");
+  assert.match(events[0].message, /already running/);
+});

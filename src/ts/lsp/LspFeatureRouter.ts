@@ -19,6 +19,9 @@ export interface LspRoute {
   priority: number;
 }
 
+/** A routed feature result: either a value, or the last server error. */
+export type RoutedResult<T> = { value: T; error?: undefined } | { value?: undefined; error: unknown };
+
 const MAX_COMPLETION_ITEMS = 200;
 const MAX_LOCATIONS = 200;
 const MAX_SYMBOLS = 500;
@@ -320,23 +323,25 @@ export class LspFeatureRouter {
     return normalized ? { ...item, ...normalized, id: item.id } : item;
   }
 
-  async hover(routes: LspRoute[], params: unknown, signal?: AbortSignal): Promise<LspHoverResult | null> {
+  async hover(routes: LspRoute[], params: unknown, signal?: AbortSignal): Promise<RoutedResult<LspHoverResult | null>> {
+    let lastError: unknown;
     for (const route of sortedRoutes(routes.filter((entry) =>
       capabilitiesFor(entry, "hover")))) {
       try {
         const result = await route.session.request<any>("textDocument/hover", params, { signal });
         const contents = hoverContents(result?.contents);
         if (!contents) continue;
-        return {
+        return { value: {
           contents,
           range: validateRange(result?.range) ? result.range : undefined,
           source: route.session.serverId,
-        };
-      } catch {
+        } };
+      } catch (error) {
+        lastError = error;
         continue;
       }
     }
-    return null;
+    return lastError === undefined ? { value: null } : { error: lastError };
   }
 
   async locations(
@@ -391,26 +396,26 @@ export class LspFeatureRouter {
     routes: LspRoute[],
     params: unknown,
     signal?: AbortSignal,
-  ): Promise<LspRenamePreparation | null> {
+  ): Promise<RoutedResult<LspRenamePreparation | null>> {
     const route = sortedRoutes(routes.filter((entry) =>
       capabilitiesFor(entry, "rename")))
       .find((entry) => entry.session.capabilities.prepareRename) ||
       sortedRoutes(routes.filter((entry) => capabilitiesFor(entry, "rename")))[0];
-    if (!route) return null;
+    if (!route) return { value: null };
     try {
       const result = await route.session.request<any>("textDocument/prepareRename", params, { signal });
-      if (!result) return null;
+      if (!result) return { value: null };
       if (validateRange(result))
-        return { range: result, placeholder: "", source: route.session.serverId };
+        return { value: { range: result, placeholder: "", source: route.session.serverId } };
       if (validateRange(result.range))
-        return {
+        return { value: {
           range: result.range,
           placeholder: typeof result.placeholder === "string" ? result.placeholder : "",
           source: route.session.serverId,
-        };
-      return null;
-    } catch {
-      return null;
+        } };
+      return { value: null };
+    } catch (error) {
+      return { error };
     }
   }
 
@@ -580,7 +585,8 @@ export class LspFeatureRouter {
     routes: LspRoute[],
     params: unknown,
     signal?: AbortSignal,
-  ): Promise<LspSignatureHelp | null> {
+  ): Promise<RoutedResult<LspSignatureHelp | null>> {
+    let lastError: unknown;
     for (const route of sortedRoutes(routes.filter((entry) =>
       capabilitiesFor(entry, "signatureHelp")))) {
       try {
@@ -596,16 +602,17 @@ export class LspFeatureRouter {
               }))
             : [],
         }));
-        return {
+        return { value: {
           signatures,
           activeSignature: Number.isSafeInteger(result.activeSignature) ? result.activeSignature : 0,
           activeParameter: Number.isSafeInteger(result.activeParameter) ? result.activeParameter : 0,
           source: route.session.serverId,
-        };
-      } catch {
+        } };
+      } catch (error) {
+        lastError = error;
         continue;
       }
     }
-    return null;
+    return lastError === undefined ? { value: null } : { error: lastError };
   }
 }

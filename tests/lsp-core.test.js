@@ -28,6 +28,7 @@ const { sanitizeLspSettings, isValidLspServers } = require("../dist/ts/lsp/LspSe
 const { LspDiagnosticsStore } = require("../dist/ts/lsp/LspDiagnosticsStore.js");
 const { LspDocumentStore } = require("../dist/ts/lsp/LspDocumentStore.js");
 const { SettingsManager } = require("../dist/ts/manager/SettingsManager.js");
+const { LspFeatureRouter } = require("../dist/ts/lsp/LspFeatureRouter.js");
 
 function frame(payload) {
   const body = Buffer.from(JSON.stringify(payload), "utf8");
@@ -321,4 +322,22 @@ test("SettingsManager persists validated LSP settings", async () => {
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("the feature router surfaces server errors instead of swallowing them", async () => {
+  const timeout = new JsonRpcTimeoutError("hover timed out");
+  const session = {
+    serverId: "fake-server",
+    capabilities: { hover: true, signatureHelp: true, rename: true, prepareRename: true },
+    request: async () => { throw timeout; },
+  };
+  const router = new LspFeatureRouter();
+  const routes = [{ session, priority: 0 }];
+
+  const hover = await router.hover(routes, {});
+  assert.equal(hover.error, timeout, "hover returns the server error");
+  const help = await router.signatureHelp(routes, {});
+  assert.equal(help.error, timeout, "signatureHelp returns the server error");
+  const rename = await router.prepareRename(routes, {});
+  assert.equal(rename.error, timeout, "prepareRename returns the server error");
 });

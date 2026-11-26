@@ -68,6 +68,12 @@ export class VersionManager {
   handleIPC(ipc: IpcHandlerRegistrar): void {
     ipc.handle("VersionManager:state", async () => this.packages.getState());
     ipc.handle("VersionManager:refresh", async () => this.packages.refresh());
+    ipc.handle("VersionManager:removal-check", async (_event, payload) => {
+      const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";
+      if (!SAFE_TOKEN.test(packageId))
+        return { allowed: false, packageId, requiredBy: [], reason: "Invalid package id." };
+      return this.packages.removalCheck(packageId);
+    });
     ipc.handle("VersionManager:install", async (_event, payload) => {
       const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";
       if (!SAFE_TOKEN.test(packageId))

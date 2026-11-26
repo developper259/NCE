@@ -29,6 +29,7 @@ function createRegistrar() {
 const CHANNELS = [
   "VersionManager:state",
   "VersionManager:refresh",
+  "VersionManager:removal-check",
   "VersionManager:install",
   "VersionManager:uninstall",
   "VersionManager:verify",
@@ -72,6 +73,11 @@ test("VersionManager IPC drives the full lifecycle across windows and broadcasts
     const record = afterInstall.packages[0].installations[0];
     assert.equal(record.provenance, "managed");
     assert.equal(settings.get("git.path"), record.executable);
+    const removal = await call(windowA, "VersionManager:removal-check", { packageId: "git" });
+    assert.equal(removal.allowed, true, "the renderer can check removal before asking for confirmation");
+    const invalidRemoval = await call(windowA, "VersionManager:removal-check", { packageId: "bad id" });
+    assert.equal(invalidRemoval.allowed, false);
+    assert.equal(invalidRemoval.reason, "Invalid package id.");
 
     const verified = await call(windowA, "VersionManager:verify", { installationId: record.id });
     assert.equal(verified.success, true);
@@ -187,6 +193,7 @@ test("VersionManager IPC is wired into the app, the window and the preload", () 
   assert.match(preload, /versionManager: \{/);
   assert.match(preload, /ipcRenderer\.invoke\("VersionManager:state"\)/);
   assert.match(preload, /ipcRenderer\.invoke\("VersionManager:refresh"\)/);
+  assert.match(preload, /ipcRenderer\.invoke\("VersionManager:removal-check", \{ packageId \}\)/);
   assert.match(preload, /ipcRenderer\.invoke\("VersionManager:install", \{ packageId \}\)/);
   assert.match(preload, /ipcRenderer\.invoke\("VersionManager:uninstall", \{ installationId \}\)/);
   assert.match(preload, /ipcRenderer\.invoke\("VersionManager:verify", \{ installationId \}\)/);

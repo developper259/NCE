@@ -44,7 +44,10 @@ class VersionManager {
     const view = this.state.languageViews.get(languageId);
     if (!view) return [];
     const ids = new Set((view.components || []).map((component) => component.id));
-    return this.applyEvents.filter((event) => ids.has(event.componentId));
+    // Events with no component id describe the whole operation (for example a
+    // rejected apply because another plan is running). They concern every
+    // language panel, so do not filter them out.
+    return this.applyEvents.filter((event) => !event.componentId || ids.has(event.componentId));
   }
   toggleLanguageComponent(languageId, componentId, checked) {
     this.state.toggleComponent(languageId, componentId, checked);

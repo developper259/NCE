@@ -484,11 +484,12 @@ export class LspManager {
       if (!routes.some((route) => route.session.capabilities.hover))
         throw new LspManagerError("LSP_NO_PROVIDER", "No language server provides hover information.");
       const input = asObject(payload);
-      const hover = await this.router.hover(routes, {
+      const routed = await this.router.hover(routes, {
         textDocument: { uri: document.uri },
         position: input?.position,
       });
-      return { success: true, hover };
+      if ("error" in routed) throw routed.error;
+      return { success: true, hover: routed.value };
     } catch (error) {
       return toFailure(error);
     }
@@ -541,11 +542,12 @@ export class LspManager {
       if (!routes.some((route) => route.session.capabilities.rename))
         throw new LspManagerError("LSP_NO_PROVIDER", "No language server provides rename.");
       const input = asObject(payload);
-      const preparation = await this.router.prepareRename(routes, {
+      const routed = await this.router.prepareRename(routes, {
         textDocument: { uri: document.uri },
         position: input?.position,
       });
-      return { success: true, preparation };
+      if ("error" in routed) throw routed.error;
+      return { success: true, preparation: routed.value };
     } catch (error) {
       return toFailure(error);
     }
@@ -730,12 +732,13 @@ export class LspManager {
         throw new LspManagerError("LSP_NO_PROVIDER", "No language server provides signature help.");
       const input = asObject(payload);
       const signatureContext = asObject(input?.context);
-      const help = await this.router.signatureHelp(routes, {
+      const routed = await this.router.signatureHelp(routes, {
         textDocument: { uri: document.uri },
         position: input?.position,
         ...(signatureContext ? { context: signatureContext } : {}),
       });
-      return { success: true, help };
+      if ("error" in routed) throw routed.error;
+      return { success: true, help: routed.value };
     } catch (error) {
       return toFailure(error);
     }
