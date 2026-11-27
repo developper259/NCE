@@ -306,7 +306,20 @@ class HighlightController {
     this.lastLoadedRanges.clear();
     this.rangeFailures.clear();
     const activeFile = this.editor.tabManager.activeFile;
-    if (activeFile) this.openFile(activeFile);
+    if (activeFile) {
+      // The tokens were just cleared, so the model and the rendered rows no
+      // longer agree. Reopening restores the visible range, and the refresh
+      // after it repaints the rows that were already on screen instead of
+      // waiting for the next scroll or edit to notice them.
+      Promise.resolve(this.openFile(activeFile))
+        .then(() => {
+          if (this.editor.tabManager.activeFile !== activeFile) return;
+          this.editor.lineController.refresh(true);
+        })
+        .catch((error) =>
+          console.error("[NSH] Session reset reopen failed", error),
+        );
+    }
   }
 
   async loadDocumentLines(file, startLine, endLine) {
@@ -405,7 +418,10 @@ class HighlightController {
     const requestEpoch = this.documentEpochs.get(file.id);
     const requestRevision = this.documentRevisions.get(file.id) || 0;
     const rangeKey = `${requestEpoch}:${requestRevision}:${range.startLine}:${range.endLine}`;
-    if (this.lastLoadedRanges.get(file.id) === rangeKey)
+    if (
+      this.lastLoadedRanges.get(file.id) === rangeKey &&
+      !this.hasUncachedDocumentLines(file, range.startLine, range.endLine)
+    )
       return Promise.resolve();
 
     const pending = this.rangeRequests.get(file.id);
@@ -430,8 +446,7 @@ class HighlightController {
           (this.documentRevisions.get(file.id) || 0) !== requestRevision
         ) return;
         this.lastLoadedRanges.set(file.id, currentKey);
-        this.rangeFailures.delete(failureKey);
-      } catch (error) {
+        this.rangeFailures.delete(failureKey);      } catch (error) {
         if (
           this.documentEpochs.get(file.id) !== requestEpoch ||
           (this.documentRevisions.get(file.id) || 0) !== requestRevision
@@ -454,6 +469,28 @@ class HighlightController {
     });
     this.rangeRequests.set(file.id, { rangeKey, promise });
     return promise;
+  }
+
+  /**
+   * True when any line of the range still has no tokens.
+   *
+   * `lastLoadedRanges` records which range was requested, not that every line
+   * in it received tokens. A range can be requested while the rows are being
+   * re-rendered, and the applied response then skips the lines whose text no
+   * longer matches. Trusting the range key alone leaves those lines blank until
+   * the file is reopened or edited, so the caller must still ask for the range.
+   */
+  hasUncachedDocumentLines(file, startLine, endLine) {
+    if (file?.largeFileMode === true) return false;
+    const lines = file?.lines || [];
+    const from = Math.max(0, startLine);
+    const to = Math.min(lines.length, endLine);
+    for (let index = from; index < to; index++) {
+      const line = lines[index];
+      if (!line || line.getText().trim() === "") continue;
+      if (line.getTokens() === null) return true;
+    }
+    return false;
   }
 
   getVisibleDocumentRange(file) {

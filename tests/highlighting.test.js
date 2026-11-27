@@ -203,6 +203,76 @@ test("reconnect reopens active document, invalidates ranges, leaves inactive doc
   assert.equal(calls.filter((c) => c.type === "openDocument").length, 2);
 });
 
+test("a reconnect repaints the visible rows it reopens", async () => {
+  // Switching to another app drops the NSH socket. On return the worker sends
+  // sessionReset, which clears every token, so the rows on screen must be
+  // repainted from the reopened document instead of waiting for a scroll or an
+  // edit to notice the blank lines.
+  const { editor, file, h, calls } = setup();
+  file.lines = [new LineNode("const a = 1;"), new LineNode("const b = 2;")];
+  editor.lineController.lines = file.lines;
+  editor.lineController.maxViewLines = 2;
+  let refreshes = 0;
+  editor.lineController.refresh = () => { refreshes++; };
+  await h.openFile(file);
+  assert.equal(file.lines[0].getTokens() !== null, true, "the file starts highlighted");
+
+  h.handleSessionReset();
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(refreshes > 0, true, "the reset repaints the visible rows");
+  assert.equal(file.lines[0].getTokens() !== null, true,
+    "the first visible line is highlighted again without an edit");
+  assert.equal(file.lines[1].getTokens() !== null, true,
+    "the second visible line is highlighted again without an edit");
+  assert.equal(calls.filter((c) => c.type === "openDocument").length, 2,
+    "the document is reopened once");
+});
+
+test("a cached range does not hide lines that never received tokens", async () => {
+  // lastLoadedRanges records the requested range, not that each line got
+  // tokens. Scrolling back to the top must still ask for the range when a
+  // visible line is blank, otherwise those lines stay unhighlighted until the
+  // file is reopened.
+  const { editor, file, h, calls } = setup();
+  file.lines = [new LineNode("const a = 1;"), new LineNode("const b = 2;")];
+  editor.lineController.lines = file.lines;
+  editor.lineController.maxViewLines = 2;
+  await h.openFile(file);
+  const range = h.getVisibleDocumentRange(file);
+  assert.ok(range, "the visible range is known");
+
+  // A reset clears the tokens but the range key is restored as if it had been
+  // served, which is the state the editor is in after a reconnect.
+  for (const line of file.lines) line.clearTokens();
+  h.lastLoadedRanges.set(file.id, `${h.documentEpochs.get(file.id)}:${h.documentRevisions.get(file.id) || 0}:${range.startLine}:${range.endLine}`);
+  const before = calls.filter((c) => c.type === "getDocumentLines").length;
+
+  await h.loadVisibleDocumentLines(file);
+
+  assert.equal(calls.filter((c) => c.type === "getDocumentLines").length > before, true,
+    "the range is requested again because its lines are blank");
+  assert.equal(file.lines[0].getTokens() !== null, true);
+  assert.equal(file.lines[1].getTokens() !== null, true);
+});
+
+test("a fully cached range stays cached", async () => {
+  // The guard must not turn every scroll into a request.
+  const { editor, file, h, calls } = setup();
+  file.lines = [new LineNode("const a = 1;")];
+  editor.lineController.lines = file.lines;
+  await h.openFile(file);
+  const range = h.getVisibleDocumentRange(file);
+  h.lastLoadedRanges.set(file.id, `${h.documentEpochs.get(file.id)}:${h.documentRevisions.get(file.id) || 0}:${range.startLine}:${range.endLine}`);
+  const before = calls.filter((c) => c.type === "getDocumentLines").length;
+
+  await h.loadVisibleDocumentLines(file);
+
+  assert.equal(calls.filter((c) => c.type === "getDocumentLines").length, before,
+    "a range whose lines all have tokens is not requested again");
+});
+
 test("incremental edits queue updateDocument before visible ranges", async () => {
   const { editor, file, h, calls } = setup();
   file.incrementalEligible = true;
