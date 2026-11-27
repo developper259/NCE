@@ -530,6 +530,29 @@ test("a language whose packages are all hidden still gets one catalog entry", as
   assert.ok(byFocusKey(manager.main, "vm-apply-components-javascript"));
 });
 
+test("a language with no available component adds no catalog card", async () => {
+  // Integration smoke runs narrow the registry to Git. The language
+  // definitions still exist, but none of their packages can be installed:
+  // showing a card would create a spurious "Available" section.
+  const javascript = {
+    ...javascriptLanguageView(),
+    components: javascriptLanguageView().components.map((component) => ({
+      ...component, supported: false,
+    })),
+  };
+  const { manager } = setup({
+    languages: [javascript],
+    views: { javascript },
+    packages: [packageInfo({ id: "git", name: "Git", categories: ["git"] })],
+  });
+  await manager.show();
+  await flush();
+
+  assert.equal(byFocusKey(manager.main, "vm-details-javascript"), null,
+    "an unavailable environment is not offered in the catalog");
+  assert.ok(byFocusKey(manager.main, "vm-details-git"));
+});
+
 test("a language that owns a visible package keeps a single card", async () => {
   // Python's package is the environment. Adding a language entry on top would
   // show the same environment twice.

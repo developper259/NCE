@@ -27,6 +27,12 @@ class VersionManagerCatalog {
       // A language that already owns a visible package keeps that package's
       // card: adding a second entry would show the same environment twice.
       if (components.some((component) => covered.has(component.packageId))) continue;
+      // A language whose components are all unavailable in the active registry
+      // is not an installable environment here. This happens in integration
+      // smoke runs that narrow the registry to Git: the language definitions
+      // still exist, but none of their packages can be installed. Showing a
+      // card in that case creates a spurious "Available" section.
+      if (components.length && !components.some((component) => component.supported !== false)) continue;
       entries.push(VersionManagerCatalog.languageEntry(manager, language));
     }
     return entries;
