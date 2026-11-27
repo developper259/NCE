@@ -7,13 +7,14 @@ NCE embeds a multi-server Language Server Protocol client. It is optional: editi
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | Registry | `src/ts/lsp/LspServerRegistry.ts` | Declarative server definitions, languages, extensions, commands, root markers, priorities, default enablement |
-| Executable resolution | `src/ts/lsp/LspExecutableResolver.ts` | Trusted absolute paths or PATH discovery, `shell: false`, no installation |
+| Executable resolution | `src/ts/lsp/LspExecutableResolver.ts` | Deterministic source order (configured path, NCE-managed installation, PATH), `shell: false`, runtime selection for script servers |
 | JSON-RPC transport | `src/ts/lsp/JsonRpcConnection.ts` | `Content-Length` framing in UTF-8 bytes, partial/batched messages, correlation, timeouts, cancellation, size limits |
 | Session | `src/ts/lsp/LspSession.ts` | Process lifecycle, initialize/initialized/shutdown/exit, capabilities, diagnostics, stderr logs, server-to-client requests |
 | Documents | `src/ts/lsp/LspDocumentStore.ts` | Canonical URI, language, live buffer text, monotonic versions, full/incremental changes |
 | Diagnostics | `src/ts/lsp/LspDiagnosticsStore.ts` | Per-document/per-server isolation, stale version rejection, empty publication clearing |
 | Routing | `src/ts/lsp/LspFeatureRouter.ts` | Capability checks, aggregation and exclusive-provider policies |
 | Window service | `src/ts/lsp/LspManager.ts` | Lazy sessions, `serverId + project root` keys, IPC, events, workspace cleanup |
+| Managed tools | `src/ts/packages/ManagedToolResolver.ts`, `src/ts/runtime/InternalNodeRuntime.ts` | NCE-owned installations and the embedded Node.js runtime used to launch script servers |
 | Renderer | `src/js/lsp/LspController.js`, `ProblemsPanel.js`, `LspCompletionWidget.js`, `LspPopover.js` | Buffer synchronization, diagnostics overlay, Problems panel, completion, hover, navigation, rename, code actions, formatting, symbols |
 
 Servers are started exclusively in the Electron main process. The renderer only uses the explicit `window.api.lsp` surface exposed by `Preload.js`.
@@ -46,15 +47,41 @@ Diagnostics are stored per `(document, server)` and aggregated for the renderer.
 
 | Languages | Servers |
 | --- | --- |
-| JavaScript / TypeScript | `typescript-language-server` (default), `eslint-language-server` (optional) |
-| Python | `basedpyright` (default), `ruff` (optional) |
-| C / C++ | `clangd` (`clangd`) |
+| JavaScript / TypeScript | `typescript-language-server` (default, managed), `eslint-language-server` (optional) |
+| Python | `pyright` (default, managed), `ruff` (optional) || C / C++ | `clangd` (`clangd`) |
 | HTML / CSS / JSON / YAML | `vscode-html-language-server`, `vscode-css-language-server`, `vscode-json-language-server`, `yaml-language-server` |
 | PHP | `intelephense` (default), `phpactor` (optional) |
 | Java | `eclipse-jdtls` (`jdtls`, explicit configuration required) |
 | XML | `lemminx` |
 
 Adding a server means adding one declarative entry; the transport, document store, routing and renderer do not change. The initial registry follows the language ids used by NSH (`.h` maps to C, `.svg` to XML, unknown extensions stay plain text).
+
+Server ids that were renamed keep working through `SERVER_ID_ALIASES` in the registry, so a `settings.json` written before a rename still applies. `basedpyright` is an alias of `pyright`.
+
+## Managed servers and the embedded runtime
+
+Two servers are installed by NCE rather than discovered on the machine: `typescript-language-server` and `pyright`. Both are JavaScript entry points, so neither is a native binary:
+
+| Server | Package | Entry point | Runtime | Extra dependency |
+| --- | --- | --- | --- | --- |
+| TypeScript Language Server | `typescript-language-server` | `lib/cli.mjs` | embedded Node.js | `typescript` SDK (`lib/tsserver.js`) |
+| Pyright | `pyright` | `langserver.index.js` | embedded Node.js | none |
+
+The embedded Node.js runtime is a standalone binary shipped in the application resources, outside `app.asar`, pinned to one version in `scripts/internal-node-config.cjs` and verified by SHA-256 at build time. It exists so NCE never depends on a Node.js installation on the user's machine, and it is **not** the runtime of the user's project: running a project is a separate concern (see `docs/runtime.md`).
+
+`RunAsNode` stays disabled; the embedded binary is executed directly, never through `ELECTRON_RUN_AS_NODE`.
+
+`typescript-language-server` locates `tsserver.js` in a sibling `node_modules/typescript/lib`, which does not exist in an NCE installation because TypeScript is installed in its own directory. The registry therefore passes `initializationOptions.tsserver.fallbackPath`, the officially supported last-resort hook, so a project that ships its own usable TypeScript keeps using it. Setting `path` instead would override the workspace version unconditionally.
+
+## Executable resolution order
+
+Resolution is deterministic and every failure names the source that was tried:
+
+1. An absolute path configured by the user in `settings.json` (`lsp.servers.<id>.path`). This always wins, so existing setups keep working.
+2. A valid NCE-managed installation, when the server definition declares one. A managed installation wins over PATH so NCE never silently runs an unrelated system binary with the same name.
+3. A binary discovered on PATH.
+
+A server that declares `requiresConfiguration` (for example `eclipse-jdtls`) has no PATH fallback and reports that an explicit path is required. A managed server whose package is not installed, or whose files are missing, reports that instead of launching a process that would exit immediately.
 
 ## Configuration
 
@@ -79,7 +106,9 @@ Paths must be absolute and are validated at startup. The configured executable i
 
 ## When a server is missing
 
-Nothing is installed or downloaded. The document still opens and edits normally. Status reports `Executable not found`, the Problems panel shows which servers are ready or unavailable, and feature commands report that no provider is available instead of pretending success.
+The document still opens and edits normally. Status reports `Pyright: Executable not found` (or the equivalent for the server in question), the Problems panel shows which servers are ready or unavailable, and feature commands report that no provider is available instead of pretending success.
+
+For the two managed servers the fix is in the Version Manager: install the language environment, which installs the server and its runtime together. For every other server, NCE does not download anything: configure an absolute path in `settings.json` or install the binary on PATH.
 
 ## Feature policies
 
@@ -121,7 +150,8 @@ Navigation, rename, code action, formatting, symbol and Problems commands are av
 
 ## Current limits
 
-- No Runtime Manager: no download, install, update or uninstall.
+- Managed installation covers `typescript-language-server` and `pyright` only. Every other server in the registry is resolved from a configured path or from PATH; NCE does not download it.
+- The embedded Node.js runtime is not a project runtime. It runs language servers, not the user's code.
 - Snippet placeholders are not expanded; completion inserts plain text.
 - Semantic tokens, code lenses, inlay hints, call hierarchy, document links and workspace-symbol resolution are not surfaced in the UI.
 - Progress is displayed as status text, without a dedicated progress bar.

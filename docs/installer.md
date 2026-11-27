@@ -1,6 +1,6 @@
 # Package installer
 
-NCE embeds a generic, declarative package installer. It downloads, verifies and installs self-contained tool distributions into the NCE user data directory. Git is the only package today; language servers, runtimes and compilers can be added later as definitions without touching the engine.
+NCE embeds a generic, declarative package installer. It downloads, verifies and installs self-contained tool distributions into the NCE user data directory. Five definitions ship today (Git, Python, Pyright, TypeScript, TypeScript Language Server); new tools are added as definitions without touching the engine.
 
 The installer never writes into a project, the application bundle or `resources/`, and it never replaces a configured Git path unless the installation succeeded and was verified.
 
@@ -14,7 +14,7 @@ The installer never writes into a project, the application bundle or `resources/
 | Download | `src/ts/installer/download.ts` | HTTPS streaming, redirects, inline checksum, size and idle limits, truncation detection |
 | Extraction | `src/ts/installer/extract.ts` | ZIP (`yauzl`) and TAR.GZ (`tar-stream` + `zlib`), path gating, link materialization, `stripComponents` |
 | Registry | `src/ts/installer/registry.ts`, `packages/index.ts` | Package lookup by id over the embedded definitions |
-| Git definition | `src/ts/installer/packages/git.ts` | Verified dugite-native distributions, checksums, sizes, executables |
+| Definitions | `src/ts/installer/packages/` | `git.ts`, `python.ts`, `pyright.ts`, `typescript.ts`, `typescript-language-server.ts` |
 | App service | `src/ts/manager/InstallerManager.ts` | One shared installer per app, `Installer:install` / `Installer:cancel` IPC, per-window progress |
 | Preload | `src/js/main/Preload.js` | `window.api.installer.install/cancel/onProgress` |
 | Trigger | `src/js/sidebar/Git.Sidebar.js` | "Install Git" in the missing-Git state, progress display, `git.path` configuration |
@@ -38,6 +38,18 @@ definition → platform/arch → existing install? → staging → steps → ver
 8. Staging is always removed, on success and on failure.
 
 `await installer.install("git", { onProgress })` resolves to `{ success: true, packageId, version, executable, installDir }` or `{ success: false, packageId, code, error }`. `installer.cancel()` aborts the active installation; a cancelled install reports `CANCELLED` and leaves no partial directory.
+
+## Shipped packages
+
+| Package | Version | Source | Installed executable |
+| --- | --- | --- | --- |
+| `git` | 2.56.1 | dugite-native | `tools/git/2.56.1/bin/git` (`cmd/git.exe` on Windows) |
+| `python` | 3.12.16 | python-build-standalone | `tools/python/3.12.16/bin/python` (`python.exe` on Windows) |
+| `pyright` | 1.1.414 | npm tarball | `tools/pyright/1.1.414/langserver.index.js` |
+| `typescript` | 6.0.3 | npm tarball | `tools/typescript/6.0.3/lib/tsserver.js` |
+| `typescript-language-server` | 6.1.0 | npm tarball | `tools/typescript-language-server/6.1.0/lib/cli.mjs` |
+
+The three JavaScript-based packages are script entry points, not native binaries: they are launched by the embedded Node.js runtime (see `docs/runtime.md`), never by a Node.js installed on the user's machine. Git and Python are native distributions.
 
 ## Supported Git platforms
 
@@ -104,7 +116,7 @@ export const tool: PackageDefinition = {
 
 Step paths and arguments accept the tokens `{installDir}`, `{stagingDir}`, `{downloadDir}`, `{archive}`, `{id}`, `{version}`, `{platform}` and `{arch}`. `command`, `copy`, `move` and `delete` steps are confined to the staging directory; `command` and `verify` executables are confined to the install directory.
 
-Future subsystems keep their own directories (`tools/language-servers`, `tools/runtimes` are not created yet); nothing in the engine is Git-specific.
+Future subsystems keep their own directories; nothing in the engine is Git-specific. Every definition currently installs under `tools/{id}/{version}`, and the Version Manager reads the resulting inventory to decide what is installed, what is usable and what needs repair.
 
 ## Tests
 
