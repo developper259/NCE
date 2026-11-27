@@ -47,16 +47,19 @@ test("runtime resolution reports a missing binary explicitly", async () => {
   }
 });
 
-test("runtime resolution rejects a non-executable binary on POSIX", async () => {
+test("runtime resolution rejects a non-executable binary on POSIX", { skip: process.platform === "win32" }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nce-runtime-mode-"));
   try {
     const dir = path.join(tmp, config.RESOURCE_DIR, config.VERSION);
     fs.mkdirSync(dir, { recursive: true });
-    const binary = path.join(dir, process.platform === "win32" ? "node.exe" : "node");
+    // Check the executable bit with the host platform's own binary name: on
+    // Windows the resolver skips this check entirely, and asking it to resolve
+    // a POSIX name would fail on "does not exist" instead of the intended case.
+    const binary = path.join(dir, "node");
     fs.writeFileSync(binary, "not a node binary");
     fs.chmodSync(binary, 0o644);
     await assert.rejects(
-      resolveInternalNodeRuntime({ resourcesPath: tmp, platform: "darwin" }),
+      resolveInternalNodeRuntime({ resourcesPath: tmp }),
       /not executable/,
     );
   } finally {
@@ -103,7 +106,9 @@ test("development resolves the binary next to the app, packaged uses resourcesPa
 });
 
 test("runtime path stays inside resources and never consults PATH", () => {
-  const resources = "/opt/nce/resources";
+  // Build the root with the host separator: a hard-coded POSIX path becomes a
+  // mixed-separator string on Windows, where path.join and startsWith disagree.
+  const resources = path.join(path.sep, "opt", "nce", "resources");
   const expected = path.join(
     resources,
     "internal-node",
