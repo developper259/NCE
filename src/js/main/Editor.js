@@ -68,6 +68,21 @@ class Editor {
       ),
       canKill: () => Boolean(this.terminalPanel?.getActiveSession?.()),
     });
+    // Run is its own panel: it executes the current file with the resolved
+    // runtime and shows what it printed. It is not the terminal (interactive
+    // shell) and not the test runner (project test command).
+    this.bottomPanelManager.registerPanel({
+      id: "run",
+      title: "Run",
+      createView: (container, editor) => {
+        this.runPanel = new RunPanel(editor);
+        container?.replaceChildren?.(this.runPanel.element);
+        return this.runPanel;
+      },
+      onNew: () => this.runPanel?.run(),
+      onKill: () => this.runPanel?.stop(),
+      canKill: () => Boolean(this.runPanel?.running),
+    });
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
     this.contextMenuManager = new ContextMenuManager(this);

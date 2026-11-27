@@ -92,5 +92,6 @@
   "js/lsp/LspCompletionWidget.js",
   "js/lsp/ProblemsPanel.js",
   "js/lsp/LspController.js",
+  "js/run/RunPanel.js",
   "js/main/Editor.js"
 ]
