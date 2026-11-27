@@ -221,7 +221,7 @@ class RunController {
   append(kind, text) {
     if (!text) return;
     const last = this.entries[this.entries.length - 1];
-    if (last && last.kind === kind && !last.closed) {
+    if (last && last.kind === kind) {
       last.text += text;
       this.characters += text.length;
     } else {
@@ -229,23 +229,11 @@ class RunController {
         id: ++this.sequence,
         kind,
         text,
-        closed: false,
       });
       this.characters += text.length;
     }
     this.trim();
     if (this.onEntry) this.onEntry(this.entries[this.entries.length - 1], kind);
-  }
-
-  /**
-   * Close the current entry so the next chunk starts a new one.
-   *
-   * Used when a system message or an error interrupts a stream, so program
-   * output and NCE's own messages never merge into one block.
-   */
-  seal() {
-    const last = this.entries[this.entries.length - 1];
-    if (last) last.closed = true;
   }
 
   /** Drop the oldest entries once the caps are exceeded. */

@@ -316,7 +316,7 @@ class RunPanel {
     this.infoFile.textContent = target.name || target.path || "";
     this.infoFile.title = target.path || "";
 
-    const spec = RUNNABLE[String(target.language || "").toLowerCase()];
+    const spec = RunPanel.RUNNABLE[String(target.language || "").toLowerCase()];
     this.infoLanguage.textContent = spec ? spec.label : "";
 
     if (runtime) {
@@ -426,7 +426,8 @@ class RunPanel {
    *
    * Growth is an append on the entry's text node, not a rewrite of the log,
    * so a chatty program costs one DOM write per batch instead of a full
-   * re-render per chunk.
+   * re-render per chunk. The controller merges consecutive chunks into one
+   * entry, so the delta is whatever was added since the last render.
    */
   renderEntry(entry) {
     if (!entry) return;
@@ -441,23 +442,15 @@ class RunPanel {
       const text = document.createTextNode(entry.text);
       line.append(text);
       this.log.append(line);
-      this.entryNodes.set(entry.id, { line, text });
-      node = this.entryNodes.get(entry.id);
-    } else {
-      // The controller merged this chunk into an existing entry.
-      node.text.appendData(entry.text.slice(node.text.length));
+      node = { line, text, length: entry.text.length };
+      this.entryNodes.set(entry.id, node);
+    } else if (entry.text.length > node.length) {
+      node.text.appendData(entry.text.slice(node.length));
+      node.length = entry.text.length;
     }
 
     if (this.following) this.scrollToEnd();
     else this.syncFollow();
-  }
-
-  /** Rebuild the whole log from the controller, used after Clear or reset. */
-  renderLog() {
-    this.log.replaceChildren();
-    this.entryNodes.clear();
-    for (const entry of this.controller.entries) this.renderEntry(entry);
-    this.renderEmptyState();
   }
 
   // ---- scrolling ----------------------------------------------------------

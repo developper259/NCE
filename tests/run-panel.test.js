@@ -308,6 +308,20 @@ test("stdout and stderr are visually distinct entries", async () => {
   assert.ok(lines[1].classList.contains("run-panel-line-stderr"));
 });
 
+test("streamed output is appended, never duplicated", async () => {
+  const h = harness({ file: fileNode() });
+  await h.panel.run();
+  h.send({ type: "state", runId: "run-1", state: "running" });
+  // One entry, grown three times. A render that rewrote the entry instead of
+  // appending the delta would show "aaabbbccc" here.
+  h.send({ type: "output", runId: "run-1", stream: "stdout", text: "aaa" });
+  h.send({ type: "output", runId: "run-1", stream: "stdout", text: "bbb" });
+  h.send({ type: "output", runId: "run-1", stream: "stdout", text: "ccc" });
+
+  assert.equal(h.panel.controller.entries.length, 1);
+  assert.equal(h.panel.log.renderedText, "aaabbbccc");
+});
+
 test("a system message is marked as NCE talking, not the program", async () => {
   const h = harness({ file: fileNode() });
   await h.panel.run();
