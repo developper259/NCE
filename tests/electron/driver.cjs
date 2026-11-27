@@ -125,7 +125,7 @@ app.whenReady().then(() => {
         },
       );
       traceStep("renderer initialized");
-      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight" && phase !== "search" && phase !== "version-manager") {
+      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight" && phase !== "search" && phase !== "version-manager" && phase !== "run") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -3417,6 +3417,98 @@ app.whenReady().then(() => {
           );
         }
         traceStep("Search sidebar visual checks passed");
+      } else if (phase === "run") {
+        traceStep("Run UI checks started");
+        if (win.isFullScreen()) win.setFullScreen(false);
+        if (win.isMaximized()) win.unmaximize();
+        win.webContents.setBackgroundThrottling?.(false);
+        win.show();
+        win.focus();
+        win.setBounds({ width: 1200, height: 800 });
+        await waitForCondition(
+          async () =>
+            (await run("window.innerWidth >= 900 && window.innerHeight >= 600")) === true,
+          { timeout: 10000, description: "Run fixture viewport" },
+        );
+
+        // A real workspace with real programs, so the run is a real run.
+        const runWorkspace = path.join(directory, "run-workspace");
+        fs.mkdirSync(runWorkspace, { recursive: true });
+        fs.writeFileSync(path.join(runWorkspace, ".nce-smoke"), "");
+        const pythonFile = path.join(runWorkspace, "main.py");
+        fs.writeFileSync(pythonFile, 'print("bonjour")\n', "utf8");
+        const failingFile = path.join(runWorkspace, "boom.py");
+        fs.writeFileSync(failingFile, 'raise ValueError("bad input")\n', "utf8");
+        const jsFile = path.join(runWorkspace, "loop.js");
+        fs.writeFileSync(
+          jsFile,
+          'console.log("started"); setInterval(() => {}, 1000);\n',
+          "utf8",
+        );
+        const tsFile = path.join(runWorkspace, "typed.ts");
+        fs.writeFileSync(tsFile, "const value: number = 1;\n", "utf8");
+
+        await selectWorkspace(runWorkspace);
+        // macOS resolves /tmp to /private/tmp, so compare the real path.
+        const realRunWorkspace = await fs.promises.realpath(runWorkspace);
+        await waitForCondition(
+          async () =>
+            (await run(
+              `editor.fileExplorer?.rootPath === ${JSON.stringify(realRunWorkspace)}`,
+            )) === true,
+          { timeout: 15000, description: "Run workspace to become active" },
+        );
+
+        const runResult = await run(
+          `(${require("./run-ui.cjs").toString()})(${JSON.stringify({
+            workspace: realRunWorkspace,
+            pythonFile: await fs.promises.realpath(pythonFile),
+            jsFile: await fs.promises.realpath(jsFile),
+            failingFile: await fs.promises.realpath(failingFile),
+          })})`,
+        );
+        assert.equal(runResult.actionPresent, true);
+        assert.equal(runResult.actionAligned, true, "the Run control sits in the tab strip");
+        // The lifecycle really passed through these, in this order. The
+        // listener attaches after the click, so early states may be missed;
+        // what matters is that running came before success and nothing
+        // reported a state out of order.
+        const seen = runResult.lifecycle;
+        assert.ok(seen.includes("success"), `the run never reported success: ${seen}`);
+        if (seen.includes("running")) {
+          assert.ok(
+            seen.indexOf("running") < seen.indexOf("success"),
+            `running came after success: ${seen}`,
+          );
+        }
+        assert.equal(runResult.stdoutRendered, true);
+        assert.match(runResult.runtimeShown, /python/i);
+        assert.equal(runResult.successStatus, "Finished");
+        assert.equal(runResult.errorStatus, "Failed");
+        assert.equal(runResult.cancelledStatus, "Stopped");
+        assert.equal(runResult.stopWorked, true);
+        assert.equal(runResult.closeKeptRunning, true);
+        assert.equal(runResult.clearKeptRunning, true);
+        assert.equal(runResult.typescriptDisabled, true);
+        const runScreenshotPath = process.env.NCE_RUN_SCREENSHOT_PATH;
+        if (runScreenshotPath) {
+          fs.writeFileSync(runScreenshotPath, (await win.capturePage()).toPNG());
+        }
+
+        // Geometry and colour, read from the live DOM. A screenshot cannot
+        // fail a build; these can.
+        const layout = await run(
+          `(${require("./run-layout.cjs").toString()})(${JSON.stringify({
+            pythonFile: await fs.promises.realpath(pythonFile),
+          })})`,
+        );
+        assert.deepEqual(
+          layout.failed,
+          [],
+          `Run layout audit failures:\n${layout.failed.join("\n")}`,
+        );
+        traceStep(`Run layout audit: ${layout.findings.length} checks passed`);
+        traceStep("Run UI checks passed");
       } else if (phase === "version-manager") {
         traceStep("Version Manager popup checks started");
         if (win.isFullScreen()) win.setFullScreen(false);

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { DirtyBufferRecoveryStore } = require('../../dist/ts/addon/DirtyBufferRecovery.js');
 
 async function launchElectron(directory, phase, extraEnv = {}) {
@@ -133,6 +133,26 @@ test('real Electron: Search sidebar design A visual states', { timeout: 120000 }
   await fs.writeFile(path.join(directory, '.nce-smoke'), '');
   try {
     await launchElectron(directory, 'search');
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('real Electron: Run button, streaming output and Stop', { timeout: 180000 }, async () => {
+  // A real Python and a real Node program, run from a real workspace, with the
+  // output read out of the real panel. Skipped where python is unavailable,
+  // because the point is a real interpreter and not a stub.
+  if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === '1') return;
+  const python = spawnSync('python3', ['--version'], { encoding: 'utf8' });
+  const pythonOk = !python.error && python.status === 0;
+  if (!pythonOk) {
+    console.log('python3 not available; skipping the Run UI journey');
+    return;
+  }
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-run-'));
+  await fs.writeFile(path.join(directory, '.nce-smoke'), '');
+  try {
+    await launchElectron(directory, 'run');
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
