@@ -73,7 +73,7 @@ class Editor {
     // shell) and not the test runner (project test command).
     this.bottomPanelManager.registerPanel({
       id: "run",
-      title: "Run",
+      title: "Output",
       createView: (container, editor) => {
         this.runPanel = new RunPanel(editor);
         container?.replaceChildren?.(this.runPanel.element);
@@ -81,8 +81,10 @@ class Editor {
       },
       onNew: () => this.runPanel?.run(),
       onKill: () => this.runPanel?.stop(),
-      canKill: () => Boolean(this.runPanel?.running),
+      canKill: () => Boolean(this.runPanel?.controller?.canStop),
     });
+    // The Run control lives in the tab strip, next to the file it acts on.
+    this.runAction = new RunAction(this);
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
     this.contextMenuManager = new ContextMenuManager(this);
@@ -183,6 +185,8 @@ class Editor {
     if (this.lineController) {
       this.lineController.syncDimensions();
     }
+    // The tab strip exists now, so the Run control has somewhere to live.
+    this.runAction?.mount();
 
     this.initQuitEvent();
     this.api.onAutoSaveToggleRequested?.(() => this.toggleAutoSave());

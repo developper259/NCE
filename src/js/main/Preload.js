@@ -286,6 +286,17 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("Agent:cancelProcess", requestId),
   resolveAgentRuntime: (request) =>
     ipcRenderer.invoke("Agent:resolveRuntime", request),
+
+  // Run: execute one file. The renderer sends a path and a strategy, never a
+  // command line; the main process derives and validates everything else.
+  startRun: (request) => ipcRenderer.invoke("Run:start", request),
+  stopRun: (runId) => ipcRenderer.invoke("Run:stop", runId),
+  resolveRun: (request) => ipcRenderer.invoke("Run:resolve", request),
+  onRunEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("Run:event", listener);
+    return () => ipcRenderer.removeListener("Run:event", listener);
+  },
   respondAgentApproval: (payload) =>
     ipcRenderer.invoke("Agent:respondApproval", payload),
   cancelAgentApproval: (approvalId) =>

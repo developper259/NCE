@@ -157,6 +157,8 @@ class Events {
     this.editor.lspController?.handleOpenFile?.(arg);
     this.editor.statesManager.save();
     this.editor.titleBar?.refresh();
+    // Run acts on the active file, so its label and enabled state follow the tab.
+    this.editor.runAction?.refresh();
   }
   onCloseFile(arg) {
     this.editor.lspController?.handleCloseFile?.(arg);
@@ -164,6 +166,7 @@ class Events {
     else this.editor.highlightController?.closeAllFiles();
     this.editor.statesManager.save();
     this.editor.titleBar?.refresh();
+    this.editor.runAction?.refresh();
   }
   onOpenProject(arg) {
     this.editor.titleBar?.refresh();
