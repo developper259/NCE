@@ -17,6 +17,7 @@ import { ContextMenu } from "./addon/ContextMenu";
 import { WorkspaceSearch } from "./addon/WorkspaceSearch";
 import { AgentApprovalManager } from "./addon/AgentApprovalManager";
 import { AgentProcessRunner } from "./addon/AgentProcessRunner";
+import { RunProcessSupervisor } from "./run/RunProcessSupervisor";
 import { TerminalManager } from "./terminal/TerminalManager";
 import { normalizeTerminalLink } from "./terminal/TerminalTypes";
 import { resolveInternalNodeRuntime } from "./runtime/InternalNodeRuntime";
@@ -115,6 +116,7 @@ export class Window {
   workspaceSearch: WorkspaceSearch | undefined;
   agentApprovalManager: AgentApprovalManager | undefined;
   agentProcessRunner: AgentProcessRunner | undefined;
+  runProcessSupervisor: RunProcessSupervisor | undefined;
   terminalManager: TerminalManager | undefined;
   gitManager: GitManager | undefined;
   lspManager: LspManager | undefined;
@@ -177,6 +179,7 @@ export class Window {
     this.closedPromise = new Promise((resolve) => { this.resolveClosed = resolve; });
     this.agentApprovalManager = undefined;
     this.agentProcessRunner = undefined;
+    this.runProcessSupervisor = undefined;
     this.terminalManager = undefined;
     this.gitManager = undefined;
     this.pathAccess = new PathAccess(
@@ -325,6 +328,9 @@ export class Window {
     };
     this.agentApprovalManager = new AgentApprovalManager(this, this.ipc);
     this.agentProcessRunner = new AgentProcessRunner(this, this.ipc);
+    // Run owns its own supervisor: it is not the agent, so it does not ask the
+    // agent's approval manager for permission to run the user's own file.
+    this.runProcessSupervisor = new RunProcessSupervisor(this, this.ipc);
 
     this.appMenu = new AppMenu(this.window, this);
     if (this.initialSession.maximized) this.window.maximize();
@@ -584,6 +590,7 @@ export class Window {
     this.workspaceSearch?.handleIPC();
     this.agentApprovalManager?.handleIPC();
     this.agentProcessRunner?.handleIPC();
+    this.runProcessSupervisor?.handleIPC();
     this.terminalManager?.registerIPC();
     this.gitManager?.handleIPC(this.ipc);
     this.lspManager?.handleIPC(this.ipc);
@@ -1079,6 +1086,7 @@ export class Window {
   private async disposeWindowServices(owner?: WebContents): Promise<void> {
     this.agentApprovalManager?.cancelAll();
     this.agentProcessRunner?.dispose();
+    this.runProcessSupervisor?.dispose();
     this.gitManager?.dispose();
     await this.lspManager?.dispose();
     await this.watcher?.dispose();
