@@ -1,0 +1,427 @@
+/* ==========================================================================
+   Run
+   The Run control in the tab strip, and the OUTPUT view it drives.
+
+   Everything here is built from the existing theme tokens in var.css. No new
+   palette, no gradients, no glass, no shadows beyond the panel's own border.
+   The intent is that Run looks like it was always part of NCE.
+   ========================================================================== */
+
+/* ---- Run control, in the tab strip ------------------------------------- */
+
+.run-action {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  height: var(--file-manager-height);
+  padding: 0 6px;
+  box-sizing: border-box;
+  /* Fade the tab strip out behind the control instead of drawing a hard edge. */
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--tab-bar-background) 12px
+  );
+}
+
+.run-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px 0 7px;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 90ms ease, border-color 90ms ease, color 90ms ease;
+}
+
+.run-action-button:hover:not(:disabled) {
+  border-color: var(--border-secondary);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.run-action-button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.run-action-button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+.run-action-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* The play triangle, drawn in CSS so it inherits the button's colour. */
+.run-action-icon {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid currentColor;
+}
+
+/* Idle and ready: the accent marks the primary action. */
+.run-action[data-mode="run"] .run-action-button {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.run-action[data-mode="run"] .run-action-button:hover {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: #ffffff;
+}
+
+/* Running: Stop takes over, in the warning colour, not the accent. */
+.run-action[data-mode="stop"] .run-action-button,
+.run-action[data-mode="stopping"] .run-action-button {
+  border-color: var(--state-warning);
+  color: var(--state-warning);
+}
+
+.run-action[data-mode="stop"] .run-action-button:hover {
+  background: var(--state-warning);
+  border-color: var(--state-warning);
+  color: var(--bg-primary);
+}
+
+/* Stop is a square, not a triangle. */
+.run-action[data-mode="stop"] .run-action-icon,
+.run-action[data-mode="stopping"] .run-action-icon {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.run-action[data-mode="stopping"] .run-action-button {
+  cursor: progress;
+  opacity: 0.75;
+}
+
+/* Narrow windows: keep the icon, drop the word. The tooltip still says Run. */
+@media (max-width: 720px) {
+  .run-action-label {
+    display: none;
+  }
+
+  .run-action-button {
+    padding: 0 8px;
+  }
+}
+
+/* ---- OUTPUT view ------------------------------------------------------- */
+
+.run-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}
+
+.run-panel-header {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-primary);
+  box-sizing: border-box;
+}
+
+.run-panel-heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.run-panel-title {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/* The state word. Colour is a hint, never the only signal: the word is there. */
+.run-panel-status {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-panel-status[data-state="running"] {
+  color: var(--accent-primary);
+}
+
+.run-panel-status[data-state="success"] {
+  color: var(--state-success);
+}
+
+.run-panel-status[data-state="error"] {
+  color: var(--state-error);
+}
+
+.run-panel-status[data-state="cancelled"] {
+  color: var(--text-secondary);
+}
+
+.run-panel-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.run-panel-button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.run-panel-button:hover:not(:disabled) {
+  border-color: var(--border-secondary);
+  background: var(--bg-hover-alt);
+  color: var(--text-primary);
+}
+
+.run-panel-button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+.run-panel-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.run-panel-stop {
+  border-color: var(--state-warning);
+  color: var(--state-warning);
+}
+
+.run-panel-stop:hover:not(:disabled) {
+  background: var(--state-warning);
+  border-color: var(--state-warning);
+  color: var(--bg-primary);
+}
+
+/* ---- Run facts: file, language, runtime, result ------------------------- */
+
+.run-panel-info {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-primary);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.run-panel-info-file {
+  overflow: hidden;
+  max-width: 40%;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-panel-info-item {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-panel-info-runtime {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.run-panel-info-result[data-state="success"] {
+  color: var(--state-success);
+}
+
+.run-panel-info-result[data-state="error"] {
+  color: var(--state-error);
+}
+
+.run-panel-info-result[data-state="cancelled"] {
+  color: var(--text-secondary);
+}
+
+/* ---- Error block ------------------------------------------------------- */
+
+.run-panel-error {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-primary);
+  border-left: 2px solid var(--state-error);
+  background: var(--bg-secondary);
+}
+
+.run-panel-error-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.run-panel-error-message {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.run-panel-error-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.run-panel-error-actions:empty {
+  display: none;
+}
+
+.run-panel-error-action {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.run-panel-error-action:hover:not(:disabled) {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: #ffffff;
+}
+
+/* ---- The log ----------------------------------------------------------- */
+
+.run-panel-log-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.run-panel-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 6px 10px 10px;
+  overflow: auto;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  /* Preserve the program's own whitespace, but never scroll sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+
+.run-panel-log:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.run-panel-line {
+  margin: 0;
+}
+
+/* stdout: the program talking. Primary text, no decoration. */
+.run-panel-line-stdout {
+  color: var(--text-primary);
+}
+
+/* stderr: the program complaining. Warning colour, not alarm red. */
+.run-panel-line-stderr {
+  color: var(--state-warning);
+}
+
+/* NCE talking. Muted, italic, and clearly not the program's own words. */
+.run-panel-line-system {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.run-panel-line-error {
+  color: var(--state-error);
+}
+
+.run-panel-empty {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+/* ---- Jump to latest ---------------------------------------------------- */
+
+.run-panel-jump {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 11px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.run-panel-jump:hover {
+  background: var(--bg-hover);
+}
+
+.run-panel-jump:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+/* ---- Short panels ------------------------------------------------------ */
+
+/* The panel can be dragged short. Facts collapse before the log does. */
+@media (max-height: 220px) {
+  .run-panel-info {
+    padding: 3px 10px;
+  }
+
+  .run-panel-info-runtime {
+    display: none;
+  }
+}
