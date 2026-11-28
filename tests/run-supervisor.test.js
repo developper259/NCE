@@ -563,31 +563,61 @@ test("a Python traceback arrives on stderr and the exit code is non-zero", { ski
   assert.match(stderr, /bad input/);
 });
 
-test("a project virtualenv is preferred over the PATH interpreter", { skip: !hasPython }, async () => {
-  const dir = makeWorkspace();
-  const venvBin = path.join(dir, ".venv", "bin");
-  fs.mkdirSync(venvBin, { recursive: true });
-  // A stand-in interpreter that proves it was the one used.
-  const fake = path.join(venvBin, "python");
-  fs.writeFileSync(fake, '#!/bin/sh\necho "from venv"\n', "utf8");
-  fs.chmodSync(fake, 0o755);
-  const file = writeProgram(dir, "main.py", 'print("ignored")\n');
+test("a project virtualenv is preferred over the PATH interpreter", async () => {
+  // Resolution is asserted directly instead of by running a fake interpreter:
+  // a shell-script stand-in only works on POSIX, and the priority rule is what
+  // this test is about. The probe is real, only its two filesystem primitives
+  // are replaced, so the candidate order under test is the production one.
+  const { RuntimeProbe, pythonVenvCandidates } = require(
+    path.join(root, "dist/ts/run/RunTargets.js"),
+  );
 
-  const h = createHarness(dir);
-  const started = await h.supervisor.start({
-    strategy: "python-script",
-    projectRoot: dir,
-    workspaceRoot: dir,
-    target: file,
-    language: "python",
-    name: "main.py",
-  });
-  assert.equal(started.ok, true);
+  for (const platform of ["win32", "darwin"]) {
+    const candidates = pythonVenvCandidates("/project", platform);
+    assert.deepEqual(
+      candidates,
+      platform === "win32"
+        ? [
+            "\\project\\.venv\\Scripts\\python.exe",
+            "\\project\\venv\\Scripts\\python.exe",
+          ]
+        : ["/project/.venv/bin/python", "/project/venv/bin/python"],
+      `${platform}: the virtualenv layout must match the platform`,
+    );
 
-  await h.waitFor((event) => event.type === "exit");
-  const runtime = h.events.find((event) => event.type === "runtime");
-  assert.equal(runtime.source, "project-venv");
-  assert.match(runtime.executable, /\.venv/);
+    const probe = new RuntimeProbe();
+    const existing = new Set([candidates[0]]);
+    const probed = [];
+    probe.executableExists = async (candidate) => {
+      probed.push(candidate);
+      return existing.has(candidate);
+    };
+    probe.executableOnPath = async (name) => {
+      probed.push(`PATH:${name}`);
+      return true;
+    };
+
+    const resolved = await probe.resolve("python", "/project", platform);
+    assert.equal(
+      resolved.source,
+      "project-venv",
+      `${platform}: the project virtualenv must win over PATH`,
+    );
+    assert.equal(resolved.executable, candidates[0]);
+    assert.ok(
+      !probed.some((entry) => entry.startsWith("PATH:")),
+      `${platform}: PATH must not be consulted when the virtualenv exists`,
+    );
+  }
+
+  // The regression this guards: a PATH interpreter must never be chosen while
+  // the project virtualenv is present.
+  const probe = new RuntimeProbe();
+  probe.executableExists = async (candidate) =>
+    candidate === pythonVenvCandidates("/project", process.platform)[0];
+  probe.executableOnPath = async () => true;
+  const resolved = await probe.resolve("python", "/project");
+  assert.equal(resolved.source, "project-venv");
 });
 
 // ---- Teardown -------------------------------------------------------------

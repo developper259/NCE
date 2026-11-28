@@ -134,6 +134,25 @@ export function isRunStrategy(value: unknown): value is RunTarget["strategy"] {
  * without spawning anything, and so the version cache is per-instance rather
  * than global state that outlives a window.
  */
+/**
+ * Where a project virtual environment keeps its interpreter.
+ *
+ * Windows puts executables in Scripts and requires the .exe suffix; POSIX
+ * layouts use bin/python. Exported so the candidate list can be asserted on
+ * every platform without depending on the host one.
+ */
+export function pythonVenvCandidates(
+  projectRoot: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  const segments = platform === "win32" ? ["Scripts", "python.exe"] : ["bin", "python"];
+  return [
+    pathApi.join(projectRoot, ".venv", ...segments),
+    pathApi.join(projectRoot, "venv", ...segments),
+  ];
+}
+
 export class RuntimeProbe {
   private readonly versions = new Map<string, string | null>();
 
@@ -184,23 +203,14 @@ export class RuntimeProbe {
   async resolve(
     runtime: RunRuntime,
     projectRoot: string,
+    platform: NodeJS.Platform = process.platform,
   ): Promise<ResolvedRuntime | null> {
     if (runtime === "python") {
-      const candidates =
-        process.platform === "win32"
-          ? [
-              path.join(projectRoot, ".venv", "Scripts", "python.exe"),
-              path.join(projectRoot, "venv", "Scripts", "python.exe"),
-            ]
-          : [
-              path.join(projectRoot, ".venv", "bin", "python"),
-              path.join(projectRoot, "venv", "bin", "python"),
-            ];
-      for (const candidate of candidates)
+      for (const candidate of pythonVenvCandidates(projectRoot, platform))
         if (await this.executableExists(candidate))
           return { executable: candidate, prefix: [], source: "project-venv" };
 
-      for (const name of process.platform === "win32"
+      for (const name of platform === "win32"
         ? ["python", "python3", "py"]
         : ["python3", "python"])
         if (await this.executableOnPath(name))
