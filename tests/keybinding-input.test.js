@@ -422,6 +422,31 @@ test("macOS Option characters reach the editor instead of being dropped", () => 
   }
 });
 
+test("dead grave reaches the editor as a backtick", () => {
+  const written = [];
+  const { manager, calls } = fixture(
+    { action: "unused", in_editor: true },
+    {
+      activeFile: {},
+      writerController: { write: (text) => written.push(text) },
+    },
+    "Alt+Unused",
+  );
+  manager.editor.selected = true;
+  manager.onKey(
+    keyboardEvent(new HTMLElement(), {
+      key: "Dead",
+      code: "Backquote",
+      altKey: false,
+      metaKey: false,
+      ctrlKey: false,
+    }),
+  );
+
+  assert.deepEqual(written, ["`"]);
+  assert.deepEqual(calls, []);
+});
+
 test("macOS Option characters are not typed on other platforms", () => {
   const written = [];
   const { manager, calls } = fixture(

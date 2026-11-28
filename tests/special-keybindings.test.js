@@ -22,6 +22,18 @@ test("French dead-key events resolve to bindable circumflex and diaeresis keys",
   assert.equal(resolveKey({ key: "Dead", code: "Quote" }), "");
 });
 
+test("dead grave resolves to backtick on international layouts", () => {
+  const resolveKey = loadGlobal(
+    "src/config/Application.js",
+    "CONFIG_KEYBINDING_EVENT_KEY",
+  );
+
+  // On macOS international layouts the grave accent is a dead key. The
+  // keystroke must resolve to ` instead of being dropped as an empty key.
+  assert.equal(resolveKey({ key: "Dead", code: "Backquote" }), "`");
+  assert.equal(resolveKey({ key: "`", code: "Backquote" }), "`");
+});
+
 test("macOS Option shortcuts resolve to the physical key, not the produced character", () => {
   const resolveKey = loadGlobal(
     "src/config/Application.js",

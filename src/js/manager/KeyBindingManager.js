@@ -144,16 +144,21 @@ class KeyBindingManager {
         if (!handled) this.editor.writerController?.write(e.key);
       }
     } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+      // International layouts report dead keys as event.key "Dead"; the
+      // resolved key is the character the keystroke represents (e.g. ` from
+      // Backquote). A true composing key (keyCode 229) never reaches here.
+      const character =
+        e.key === "Dead" && this.isPrintableKey(key) ? key : e.key;
       if (
         this.editor.tabManager.activeFile &&
-        (e.key.length == 1 || e.key === " ")
+        (this.isPrintableKey(character) || character === " ")
       ) {
         const handled = this.editor.smartTypingController?.handleCharacter(
-          e.key,
+          character,
           e,
         );
         if (!handled) {
-          this.editor.writerController.write(e.key);
+          this.editor.writerController.write(character);
         }
       }
     }

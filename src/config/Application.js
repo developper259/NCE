@@ -572,6 +572,13 @@ function CONFIG_KEYBINDING_EVENT_KEY(event) {
     return event.shiftKey ? "¨" : "^";
   }
 
+  // On international layouts the grave accent is a dead key: macOS reports
+  // key "Dead" with code "Backquote". It must resolve to the backtick so the
+  // keystroke is not swallowed before the editor can handle it.
+  if (event?.code === "Backquote") {
+    return "`";
+  }
+
   return "";
 }
 
