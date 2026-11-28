@@ -2,6 +2,8 @@ class KeyBindingManager {
   constructor(e) {
     this.editor = e;
     this.isComposing = false;
+    // A dead key pressed but not yet followed by a letter (^ then u -> û).
+    this.pendingDeadKey = null;
     this.terminalTabActions = new Set([
       "new_file",
       "new_terminal",
@@ -375,6 +377,11 @@ class KeyBindingManager {
 
   onKey(e) {
     if (this.isComposing || e.isComposing || e.keyCode === 229) return;
+
+    // The editor has no editable element, so the browser never composes dead
+    // keys: ^ then u arrives as two keydowns. Compose the pair here instead.
+    if (this.handleDeadKey(e)) return;
+
     const eventKey = CONFIG_KEYBINDING_EVENT_KEY(e);
     if (!eventKey) return;
 
@@ -486,6 +493,57 @@ class KeyBindingManager {
     } else {
       this.bind(shortcutKey, e);
     }
+  }
+
+  /**
+   * Compose a dead key with the letter that follows it.
+   *
+   * Returns true when the keystroke was consumed here. A dead key on its own
+   * writes nothing yet: it waits for the next printable key. If that key takes
+   * the accent (u + U+0302 -> û) the composed character is written; otherwise
+   * the spacing accent and the key are written separately, which is what a
+   * real keyboard produces for an accent that cannot apply.
+   */
+  handleDeadKey(e) {
+    const dead = CONFIG_KEYBINDING_DEAD_KEY_MARK?.(e) || null;
+
+    if (dead) {
+      this.pendingDeadKey = dead;
+      e.preventDefault();
+      e.stopPropagation();
+      return true;
+    }
+
+    const pending = this.pendingDeadKey;
+    if (!pending) return false;
+
+    // Any shortcut, modifier or non-text key cancels the pending accent.
+    const isText =
+      this.isPrintableKey(e.key) &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey;
+    if (!isText) {
+      this.pendingDeadKey = null;
+      return false;
+    }
+
+    this.pendingDeadKey = null;
+    const composed = `${e.key}${pending.mark}`.normalize("NFC");
+    const text =
+      Array.from(composed).length === 1 ? composed : `${pending.spacing}${e.key}`;
+
+    if (this.editor.tabManager.activeFile) {
+      const handled = this.editor.smartTypingController?.handleCharacter?.(
+        text,
+        e,
+      );
+      if (!handled) this.editor.writerController?.write(text);
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
   }
 
   onCompositionStart() {

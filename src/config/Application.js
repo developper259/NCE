@@ -576,10 +576,37 @@ function CONFIG_KEYBINDING_EVENT_KEY(event) {
   // key "Dead" with code "Backquote". It must resolve to the backtick so the
   // keystroke is not swallowed before the editor can handle it.
   if (event?.code === "Backquote") {
-    return "`";
+    return event.shiftKey ? "~" : "`";
   }
 
   return "";
+}
+
+/**
+ * The diacritic a dead key stands for, or null for an ordinary keystroke.
+ *
+ * The editor has no editable element, so the browser never composes dead keys
+ * itself: pressing ^ then u delivers two separate keydowns and no
+ * compositionend. KeyBindingManager uses these marks to compose the pair
+ * itself. `spacing` is what to write when the following key cannot take the
+ * accent, which is what a real keyboard produces in that case.
+ */
+function CONFIG_KEYBINDING_DEAD_KEY_MARK(event) {
+  if (String(event?.key || "") !== "Dead") return null;
+
+  if (event?.code === "BracketLeft")
+    return event.shiftKey
+      ? { mark: "\u0308", spacing: "¨" }
+      : { mark: "\u0302", spacing: "^" };
+
+  if (event?.code === "Backquote")
+    return event.shiftKey
+      ? { mark: "\u0303", spacing: "~" }
+      : { mark: "\u0300", spacing: "`" };
+
+  if (event?.code === "Quote") return { mark: "\u0301", spacing: "´" };
+
+  return null;
 }
 
 function CONFIG_KEYBINDING_NORMALIZE(key) {

@@ -57,6 +57,11 @@ function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
         "CONFIG_KEYBINDING_EVENT_KEY",
         { window: { api: { platform: "darwin" } } },
       ),
+      CONFIG_KEYBINDING_DEAD_KEY_MARK: loadGlobal(
+        "src/config/Application.js",
+        "CONFIG_KEYBINDING_DEAD_KEY_MARK",
+        { window: { api: { platform: "darwin" } } },
+      ),
       CONFIG_KEYBINDING_CONTAINSKEY: (key) => {
         const normalize = (value) =>
           String(value || "")
@@ -442,9 +447,69 @@ test("dead grave reaches the editor as a backtick", () => {
       ctrlKey: false,
     }),
   );
+  // A dead key waits for the next letter; a non-combining key then produces
+  // the spacing accent, which is what the keyboard would show.
+  manager.onKey(
+    keyboardEvent(new HTMLElement(), { key: "q", metaKey: false }),
+  );
 
-  assert.deepEqual(written, ["`"]);
+  assert.deepEqual(written, ["`q"]);
   assert.deepEqual(calls, []);
+});
+
+test("dead keys compose with the following letter", () => {
+  const cases = [
+    { dead: { key: "Dead", code: "BracketLeft" }, letter: "u", expected: "û" },
+    { dead: { key: "Dead", code: "BracketLeft", shiftKey: true }, letter: "u", expected: "ü" },
+    { dead: { key: "Dead", code: "Backquote", shiftKey: true }, letter: "n", expected: "ñ" },
+    { dead: { key: "Dead", code: "Backquote" }, letter: "a", expected: "à" },
+    { dead: { key: "Dead", code: "Quote" }, letter: "e", expected: "é" },
+    // An accent that cannot combine is written as a spacing accent.
+    { dead: { key: "Dead", code: "BracketLeft" }, letter: "q", expected: "^q" },
+  ];
+
+  for (const { dead, letter, expected } of cases) {
+    const written = [];
+    const { manager, calls } = fixture(
+      { action: "unused", in_editor: true },
+      {
+        activeFile: {},
+        writerController: { write: (text) => written.push(text) },
+      },
+      "Alt+Unused",
+    );
+    manager.editor.selected = true;
+    manager.onKey(
+      keyboardEvent(new HTMLElement(), { ...dead, metaKey: false }),
+    );
+    assert.deepEqual(written, [], "a dead key writes nothing on its own");
+    manager.onKey(
+      keyboardEvent(new HTMLElement(), { key: letter, metaKey: false }),
+    );
+
+    assert.deepEqual(written, [expected], `${letter} must compose`);
+    assert.deepEqual(calls, []);
+  }
+});
+
+test("a shortcut cancels a pending dead key", () => {
+  const written = [];
+  const { manager } = fixture(
+    { action: "open_file", in_editor: true },
+    { activeFile: {}, writerController: { write: (text) => written.push(text) } },
+    "Ctrl+O",
+  );
+  manager.editor.selected = true;
+  manager.onKey(
+    keyboardEvent(new HTMLElement(), { key: "Dead", code: "BracketLeft", metaKey: false }),
+  );
+  manager.onKey(
+    keyboardEvent(new HTMLElement(), { key: "o", ctrlKey: true, metaKey: false }),
+  );
+  manager.onKey(
+    keyboardEvent(new HTMLElement(), { key: "u", metaKey: false }),
+  );
+  assert.deepEqual(written, ["u"], "the cancelled accent must not be written");
 });
 
 test("macOS Option characters are not typed on other platforms", () => {
