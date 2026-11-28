@@ -52,6 +52,29 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     element.click();
     return element;
   };
+  // Entrance animations here are 180-200ms with fill:"backwards", so once one
+  // finishes getAnimations() drops it. Polling for playState === "running"
+  // therefore assumes the renderer never stalls longer than the animation,
+  // which a loaded Windows runner does: the poll then waits out its whole
+  // timeout for a state that can no longer occur. Accept a finished animation
+  // too, and read its keyframes either way, so the assertion is about what
+  // was animated rather than about catching it mid-flight.
+  const entranceKeyframes = (element) => {
+    if (!element) return null;
+    const animations = element.getAnimations();
+    if (!animations.length) return null;
+    const running = animations.find((animation) => animation.playState === "running");
+    const chosen = running || animations[0];
+    return chosen.effect?.getKeyframes?.() || null;
+  };
+  const waitForEntranceKeyframes = async (find, description, timeout = 2000) => {
+    let keyframes = null;
+    await waitFor(() => {
+      keyframes = entranceKeyframes(find());
+      return Boolean(keyframes);
+    }, description, timeout);
+    return keyframes;
+  };
 
   const git = editor.gitSidebar;
   check(Boolean(git), "Source Control sidebar exists");
@@ -919,14 +942,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     const animatedChanges = git.listLayer.querySelector(
       '.git-section-header[data-section="changes"]',
     );
-    let riseKeyframes = null;
-    await waitFor(() => {
-      const running = animatedChanges.getAnimations()
-        .find((animation) => animation.playState === "running");
-      if (!running) return false;
-      riseKeyframes = running.effect?.getKeyframes?.() || null;
-      return true;
-    }, "the risen Changes header to play its entrance animation", 1000);
+    const riseKeyframes = await waitForEntranceKeyframes(
+      () => animatedChanges,
+      "the risen Changes header to play its entrance animation",
+    );
     check(
       Array.isArray(riseKeyframes) && riseKeyframes.length >= 2 &&
         riseKeyframes.some((frame) => Number(frame.opacity) === 0),
@@ -935,15 +954,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
 
     // History commit items animate in once the async load renders them.
     await waitFor(() => !git.history.loading, "History commits to load");
-    let commitKeyframes = null;
-    await waitFor(() => {
-      const row = git.listLayer.querySelector(".git-commit-row");
-      const running = row?.getAnimations()
-        .find((animation) => animation.playState === "running");
-      if (!running) return false;
-      commitKeyframes = running.effect?.getKeyframes?.() || null;
-      return true;
-    }, "a History commit item to play its entrance animation", 1500);
+    const commitKeyframes = await waitForEntranceKeyframes(
+      () => git.listLayer.querySelector(".git-commit-row"),
+      "a History commit item to play its entrance animation",
+    );
     check(
       Array.isArray(commitKeyframes) && commitKeyframes.length >= 2 &&
         commitKeyframes.some((frame) => Number(frame.opacity) === 0),
@@ -965,14 +979,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       '.git-section-header[data-section="history"]',
     );
     check(Boolean(descendedHistory), "the descended History header is pinned after collapsing History");
-    let descentKeyframes = null;
-    await waitFor(() => {
-      const running = descendedHistory.getAnimations()
-        .find((animation) => animation.playState === "running");
-      if (!running) return false;
-      descentKeyframes = running.effect?.getKeyframes?.() || null;
-      return true;
-    }, "the descended History header to play its slide-down animation", 1000);
+    const descentKeyframes = await waitForEntranceKeyframes(
+      () => descendedHistory,
+      "the descended History header to play its slide-down animation",
+    );
     check(
       Array.isArray(descentKeyframes) && descentKeyframes.length >= 2 &&
         descentKeyframes.some((frame) => Number(frame.opacity) === 0),
@@ -991,15 +1001,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     // Expanding Changes animates its file rows in.
     git.collapsedBar.querySelector('.git-section-header[data-section="changes"]').click();
     await nextFrame();
-    let fileKeyframes = null;
-    await waitFor(() => {
-      const row = git.listLayer.querySelector('.git-file-row[data-section="changes"]');
-      const running = row?.getAnimations()
-        .find((animation) => animation.playState === "running");
-      if (!running) return false;
-      fileKeyframes = running.effect?.getKeyframes?.() || null;
-      return true;
-    }, "a Changes file item to play its entrance animation", 1000);
+    const fileKeyframes = await waitForEntranceKeyframes(
+      () => git.listLayer.querySelector('.git-file-row[data-section="changes"]'),
+      "a Changes file item to play its entrance animation",
+    );
     check(
       Array.isArray(fileKeyframes) && fileKeyframes.length >= 2 &&
         fileKeyframes.some((frame) => Number(frame.opacity) === 0),
