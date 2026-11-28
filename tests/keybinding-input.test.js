@@ -52,8 +52,20 @@ function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
       } } },
       window: { api: { readClipboardText: options.readClipboardText } },
       Event: class {},
-      CONFIG_KEYBINDING_EVENT_KEY: (event) => event.key,
-      CONFIG_KEYBINDING_CONTAINSKEY: (key) => key === mappedShortcut,
+      CONFIG_KEYBINDING_EVENT_KEY: loadGlobal(
+        "src/config/Application.js",
+        "CONFIG_KEYBINDING_EVENT_KEY",
+        { window: { api: { platform: "darwin" } } },
+      ),
+      CONFIG_KEYBINDING_CONTAINSKEY: (key) => {
+        const normalize = (value) =>
+          String(value || "")
+            .split("+")
+            .map((part) => part.trim().toLowerCase())
+            .sort()
+            .join("+");
+        return normalize(key) === normalize(mappedShortcut);
+      },
       CONFIG_KEYBINDING_GET_KEY: () => binding,
       CONFIG_KEYBINDING_GET_ACTION: (action) => ({ action }),
     },
@@ -400,6 +412,52 @@ test("Ctrl+Alt letter shortcuts still dispatch when AltGraph is not reported", (
 
   assert.deepEqual(calls, ["open_command"]);
   assert.deepEqual(written, [], "a real shortcut must not be typed as text");
+});
+
+test("macOS Option+Shift shortcuts dispatch from the physical key", () => {
+  const written = [];
+  const { manager, calls } = fixture(
+    { action: "lsp_format_document", in_editor: true },
+    {
+      activeFile: {},
+      writerController: { write: (text) => written.push(text) },
+    },
+    "Alt+Shift+F",
+  );
+  manager.editor.selected = true;
+  // macOS reports the produced character, not the physical key.
+  const event = keyboardEvent(new HTMLElement(), {
+    key: "ƒ",
+    code: "KeyF",
+    altKey: true,
+    shiftKey: true,
+    metaKey: false,
+  });
+
+  manager.onKey(event);
+
+  assert.deepEqual(calls, ["lsp_format_document"]);
+  assert.deepEqual(written, [], "the shortcut must not be typed as text");
+});
+
+test("macOS Option+Shift+ArrowUp dispatches from the physical key", () => {
+  const { manager, calls } = fixture(
+    { action: "add_cursor_above", in_editor: true },
+    { activeFile: {} },
+    "Alt+Shift+ArrowUp",
+  );
+  manager.editor.selected = true;
+  const event = keyboardEvent(new HTMLElement(), {
+    key: "",
+    code: "ArrowUp",
+    altKey: true,
+    shiftKey: true,
+    metaKey: false,
+  });
+
+  manager.onKey(event);
+
+  assert.deepEqual(calls, ["add_cursor_above"]);
 });
 
 test("Meta+V pastes into the focused native input through KeyBindingManager", async () => {

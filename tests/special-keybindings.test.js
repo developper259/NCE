@@ -22,6 +22,46 @@ test("French dead-key events resolve to bindable circumflex and diaeresis keys",
   assert.equal(resolveKey({ key: "Dead", code: "Quote" }), "");
 });
 
+test("macOS Option shortcuts resolve to the physical key, not the produced character", () => {
+  const resolveKey = loadGlobal(
+    "src/config/Application.js",
+    "CONFIG_KEYBINDING_EVENT_KEY",
+  );
+
+  // macOS reports the character produced by Option+Shift, not the physical
+  // key. Shortcuts are bound to the physical key.
+  assert.equal(
+    resolveKey({ key: "ƒ", code: "KeyF", altKey: true, shiftKey: true }),
+    "f",
+  );
+  assert.equal(
+    resolveKey({ key: "", code: "ArrowUp", altKey: true, shiftKey: true }),
+    "ArrowUp",
+  );
+  assert.equal(
+    resolveKey({ key: "‡", code: "ArrowRight", altKey: true, shiftKey: true }),
+    "ArrowRight",
+  );
+  assert.equal(
+    resolveKey({ key: "", code: "ArrowDown", altKey: true, shiftKey: true }),
+    "ArrowDown",
+  );
+
+  // AltGraph is Ctrl+Alt on European layouts: event.key is the character to
+  // type and must be preserved.
+  assert.equal(
+    resolveKey({ key: "#", code: "Digit3", altKey: true, ctrlKey: true }),
+    "#",
+  );
+
+  // Without Alt, nothing changes.
+  assert.equal(resolveKey({ key: "F", code: "KeyF" }), "F");
+  assert.equal(
+    resolveKey({ key: "Dead", code: "BracketLeft", shiftKey: true }),
+    "¨",
+  );
+});
+
 test("renderer remains the shortcut owner before and after Settings capture", () => {
   const ignoredStates = [];
   const { Window } = loadMain("dist/ts/Window.js", {

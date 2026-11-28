@@ -536,7 +536,35 @@ function CONFIG_KEYBINDING_PRIMARY_MODIFIER() {
   return "Ctrl";
 }
 
+// On macOS, holding Option (Alt) makes the browser report the character the
+// combination produces (Alt+Shift+F arrives as "ƒ") instead of the physical
+// key. Shortcuts are defined against physical keys, so recover the key from
+// event.code whenever Alt is held. Ctrl+Alt is excluded because that is
+// AltGraph on European layouts, where event.key is the character to type.
+function CONFIG_KEYBINDING_PHYSICAL_KEY(event) {
+  const code = String(event?.code || "");
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return letter[1].toLowerCase();
+  const digit = /^Digit([0-9])$/.exec(code);
+  if (digit) return digit[1];
+  const fn = /^(F(?:[1-9]|1\d|2[0-4]))$/.exec(code);
+  if (fn) return fn[1];
+  if (
+    /^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Home|End|Tab|Enter|Escape|Backspace|Delete|Insert|PageUp|PageDown)$/.test(
+      code,
+    )
+  )
+    return code;
+  if (code === "Space") return " ";
+  return "";
+}
+
 function CONFIG_KEYBINDING_EVENT_KEY(event) {
+  if (event?.altKey && !event?.ctrlKey) {
+    const physical = CONFIG_KEYBINDING_PHYSICAL_KEY(event);
+    if (physical) return physical;
+  }
+
   const key = String(event?.key || "");
   if (key !== "Dead") return key;
 
