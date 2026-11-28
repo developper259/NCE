@@ -50,7 +50,7 @@ function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
         if (options.clipboardFailure) throw new Error("denied");
         return " world";
       } } },
-      window: { api: { readClipboardText: options.readClipboardText } },
+      window: { api: { readClipboardText: options.readClipboardText, platform: options.platform || "darwin" } },
       Event: class {},
       CONFIG_KEYBINDING_EVENT_KEY: loadGlobal(
         "src/config/Application.js",
@@ -74,6 +74,7 @@ function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
     selected: false,
     tabManager: { activeFile: options.activeFile || null, tabs: options.tabs },
     terminalPanel: options.terminalPanel || null,
+    api: { platform: options.platform || "darwin" },
     writerController: options.writerController || null,
     smartTypingController: options.smartTypingController || null,
     keyBinding: { exec(item) { calls.push(item.action); } },
@@ -387,6 +388,61 @@ test("AltGraph characters such as # reach the editor instead of being dropped", 
     assert.deepEqual(written, ["#"], `${layout.name}: # must be typed`);
     assert.deepEqual(calls, [], `${layout.name}: # must not run a shortcut`);
   }
+});
+
+test("macOS Option characters reach the editor instead of being dropped", () => {
+  // On macOS, Option produces real characters and reports the produced
+  // character in event.key. With no matching shortcut they must be typed.
+  for (const character of ["@", "£", "#", "\\", "€", "|", "{", "¬"]) {
+    const written = [];
+    const { manager, calls } = fixture(
+      { action: "unused", in_editor: true },
+      {
+        activeFile: {},
+        writerController: { write: (text) => written.push(text) },
+      },
+      "Alt+Unused",
+    );
+    manager.editor.selected = true;
+    const event = keyboardEvent(new HTMLElement(), {
+      key: character,
+      altKey: true,
+      metaKey: false,
+      ctrlKey: false,
+    });
+
+    manager.onKey(event);
+
+    assert.deepEqual(
+      written,
+      [character],
+      `${JSON.stringify(character)} must be typed on macOS`,
+    );
+    assert.deepEqual(calls, [], "no shortcut should run");
+  }
+});
+
+test("macOS Option characters are not typed on other platforms", () => {
+  const written = [];
+  const { manager, calls } = fixture(
+    { action: "unused", in_editor: true },
+    {
+      activeFile: {},
+      platform: "linux",
+      writerController: { write: (text) => written.push(text) },
+    },
+    "Alt+Unused",
+  );
+  manager.editor.selected = true;
+  manager.onKey(
+    keyboardEvent(new HTMLElement(), {
+      key: "€",
+      altKey: true,
+      metaKey: false,
+    }),
+  );
+  assert.deepEqual(written, []);
+  assert.deepEqual(calls, []);
 });
 
 test("Ctrl+Alt letter shortcuts still dispatch when AltGraph is not reported", () => {

@@ -126,6 +126,23 @@ class KeyBindingManager {
       CONFIG_KEYBINDING_CONTAINSKEY(e.key)
     ) {
       this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(e.key), e);
+    } else if (
+      e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      this.isMacOS() &&
+      this.isPrintableKey(e.key)
+    ) {
+      // On macOS, Option produces real characters (@, £, #, \, €, |, { …) and
+      // reports the produced character in event.key. When no shortcut matched
+      // above, that character is text and must reach the editor.
+      if (this.editor.tabManager.activeFile) {
+        const handled = this.editor.smartTypingController?.handleCharacter?.(
+          e.key,
+          e,
+        );
+        if (!handled) this.editor.writerController?.write(e.key);
+      }
     } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
       if (
         this.editor.tabManager.activeFile &&
@@ -178,6 +195,13 @@ class KeyBindingManager {
 
   isPrintableKey(key) {
     return typeof key === "string" && Array.from(key).length === 1;
+  }
+
+  isMacOS() {
+    const platform =
+      this.editor?.api?.platform ??
+      (typeof window !== "undefined" ? window?.api?.platform : undefined);
+    return platform === "darwin";
   }
 
   isAltGraphCharacter(e) {
