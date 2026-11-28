@@ -88,7 +88,22 @@ class KeyBindingManager {
     }
   }
 
-  bindEditor(key, e) {
+  bindEditor(key, e, altGraphCharacter = false) {
+    // AltGr produces real text (e.g. # on AZERTY) reported as Ctrl+Alt. Write
+    // it directly instead of treating it as a shortcut or dropping it.
+    if (altGraphCharacter) {
+      if (this.editor.tabManager.activeFile) {
+        const handled = this.editor.smartTypingController?.handleCharacter?.(
+          e.key,
+          e,
+        );
+        if (!handled) this.editor.writerController?.write(e.key);
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     // Special handling for space character - treat as normal character even if it's a keybinding
     if (e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (this.editor.tabManager.activeFile) {
@@ -163,6 +178,19 @@ class KeyBindingManager {
 
   isPrintableKey(key) {
     return typeof key === "string" && Array.from(key).length === 1;
+  }
+
+  isAltGraphCharacter(e) {
+    // On AZERTY and other European layouts, #, {, }, ~, [, ], |, \ and @ are
+    // produced with AltGr, which browsers report as Ctrl+Alt. Those keystrokes
+    // are text, not shortcuts, and must reach the editor like any other key.
+    if (!this.isPrintableKey(e?.key) || e.metaKey) return false;
+    if (e.getModifierState?.("AltGraph")) return true;
+
+    // Some platforms do not report AltGraph at all, so Ctrl+Alt is the only
+    // signal left. Restrict that fallback to characters AltGr can actually
+    // produce, otherwise every Ctrl+Alt shortcut would stop working.
+    return Boolean(e.ctrlKey && e.altKey && !/^[a-zA-Z0-9]$/.test(e.key));
   }
 
   isFunctionShortcut(shortcutKey) {
@@ -326,10 +354,15 @@ class KeyBindingManager {
 
     if (!document.hasFocus()) return;
 
-    const shortcutKey = this.getShortcutKey(eventKey, e);
-    const binding = CONFIG_KEYBINDING_CONTAINSKEY(shortcutKey)
-      ? CONFIG_KEYBINDING_GET_KEY(shortcutKey)
-      : null;
+    const altGraphCharacter = this.isAltGraphCharacter(e);
+    const shortcutKey = altGraphCharacter
+      ? eventKey
+      : this.getShortcutKey(eventKey, e);
+    const binding = altGraphCharacter
+      ? null
+      : CONFIG_KEYBINDING_CONTAINSKEY(shortcutKey)
+        ? CONFIG_KEYBINDING_GET_KEY(shortcutKey)
+        : null;
 
     const terminalContext = this.isTerminalContext(e.target);
     if (
@@ -420,7 +453,7 @@ class KeyBindingManager {
     }
 
     if (this.editor.selected) {
-      this.bindEditor(shortcutKey, e);
+      this.bindEditor(shortcutKey, e, altGraphCharacter);
     } else {
       this.bind(shortcutKey, e);
     }

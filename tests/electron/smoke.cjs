@@ -158,6 +158,20 @@ test('real Electron: Run button, streaming output and Stop', { timeout: 180000 }
   }
 });
 
+test('real Electron: AltGr characters reach the editor', { timeout: 120000 }, async () => {
+  // AltGr is how #, {, | and @ are typed on AZERTY and most European layouts.
+  // Chromium reports those keystrokes as Ctrl+Alt, which the keybinding router
+  // used to treat as a shortcut and drop.
+  if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === '1') return;
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-typing-'));
+  await fs.writeFile(path.join(directory, '.nce-smoke'), '');
+  try {
+    await launchElectron(directory, 'typing');
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('real Electron: Version Manager popup lifecycle', { timeout: 120000 }, async () => {
   // The planted Git fixture is a POSIX shell script; Windows coverage lives
   // in the fixture-based PackageManager suites.

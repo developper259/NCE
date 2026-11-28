@@ -60,8 +60,10 @@ function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
   );
   const editor = {
     selected: false,
-    tabManager: { activeFile: null, tabs: options.tabs },
+    tabManager: { activeFile: options.activeFile || null, tabs: options.tabs },
     terminalPanel: options.terminalPanel || null,
+    writerController: options.writerController || null,
+    smartTypingController: options.smartTypingController || null,
     keyBinding: { exec(item) { calls.push(item.action); } },
   };
   return { manager: new KeyBindingManager(editor), calls };
@@ -343,6 +345,61 @@ test("IME composition and AltGraph text are never dispatched as shortcuts", () =
   altGraph.manager.onKey(altGraphEvent);
   assert.deepEqual(altGraph.calls, []);
   assert.equal(altGraphEvent.defaultPrevented, false);
+});
+
+test("AltGraph characters such as # reach the editor instead of being dropped", () => {
+  for (const layout of [
+    { name: "AZERTY", key: "#", getModifierState: (m) => m === "AltGraph" },
+    { name: "AltGr fallback", key: "#", getModifierState: () => false },
+  ]) {
+    const written = [];
+    const { manager, calls } = fixture(
+      { action: "unused", in_editor: true },
+      {
+        activeFile: {},
+        writerController: { write: (text) => written.push(text) },
+      },
+      "Ctrl+Alt+3",
+    );
+    manager.editor.selected = true;
+    const event = keyboardEvent(new HTMLElement(), {
+      key: layout.key,
+      metaKey: false,
+      ctrlKey: true,
+      altKey: true,
+      getModifierState: layout.getModifierState,
+    });
+
+    manager.onKey(event);
+
+    assert.deepEqual(written, ["#"], `${layout.name}: # must be typed`);
+    assert.deepEqual(calls, [], `${layout.name}: # must not run a shortcut`);
+  }
+});
+
+test("Ctrl+Alt letter shortcuts still dispatch when AltGraph is not reported", () => {
+  const written = [];
+  const { manager, calls } = fixture(
+    { action: "open_command", in_editor: true },
+    {
+      activeFile: {},
+      writerController: { write: (text) => written.push(text) },
+    },
+    "Ctrl+Alt+P",
+  );
+  manager.editor.selected = true;
+  const event = keyboardEvent(new HTMLElement(), {
+    key: "P",
+    ctrlKey: true,
+    altKey: true,
+    metaKey: false,
+    getModifierState: () => false,
+  });
+
+  manager.onKey(event);
+
+  assert.deepEqual(calls, ["open_command"]);
+  assert.deepEqual(written, [], "a real shortcut must not be typed as text");
 });
 
 test("Meta+V pastes into the focused native input through KeyBindingManager", async () => {

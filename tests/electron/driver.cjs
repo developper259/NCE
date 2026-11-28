@@ -125,7 +125,7 @@ app.whenReady().then(() => {
         },
       );
       traceStep("renderer initialized");
-      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight" && phase !== "search" && phase !== "version-manager" && phase !== "run") {
+      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight" && phase !== "search" && phase !== "version-manager" && phase !== "run" && phase !== "typing") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -3509,6 +3509,159 @@ app.whenReady().then(() => {
         );
         traceStep(`Run layout audit: ${layout.findings.length} checks passed`);
         traceStep("Run UI checks passed");
+      } else if (phase === "typing") {
+        traceStep("AltGr typing checks started");
+        if (win.isFullScreen()) win.setFullScreen(false);
+        if (win.isMaximized()) win.unmaximize();
+        win.webContents.setBackgroundThrottling?.(false);
+        win.show();
+        if (process.platform === "darwin") app.focus({ steal: true });
+        win.focus();
+        win.webContents.focus();
+        win.setBounds({ width: 1100, height: 760 });
+        await waitForCondition(
+          async () =>
+            (await run("window.innerWidth >= 900 && window.innerHeight >= 600")) === true,
+          { timeout: 10000, description: "typing fixture viewport" },
+        );
+        await waitForCondition(() => win.isFocused(), {
+          timeout: 10000,
+          description: "the window to be focused before typing",
+        });
+
+        const typingWorkspace = path.join(directory, "typing-workspace");
+        fs.mkdirSync(typingWorkspace, { recursive: true });
+        fs.writeFileSync(path.join(typingWorkspace, ".nce-smoke"), "");
+        const typingFile = path.join(typingWorkspace, "notes.py");
+        fs.writeFileSync(typingFile, "", "utf8");
+        assert.equal(await selectWorkspace(typingWorkspace), true);
+        const realTypingWorkspace = await fs.promises.realpath(typingWorkspace);
+        await waitForCondition(
+          async () =>
+            (await run(
+              `editor.fileExplorer?.rootPath === ${JSON.stringify(realTypingWorkspace)}`,
+            )) === true,
+          { timeout: 15000, description: "typing workspace to become active" },
+        );
+
+        await run(
+          `editor.tabManager.openFileWithPath(${JSON.stringify(typingFile)}).then(() => true)`,
+        );
+        await waitForCondition(
+          async () =>
+            (await run(`(() => {
+              const file = editor.tabManager.activeFile;
+              return Boolean(file) && file.isLoaded === true &&
+                file.path === ${JSON.stringify(typingFile)};
+            })()`)) === true,
+          { timeout: 15000, description: "the typing fixture to load" },
+        );
+
+        // Put the caret in the editor and give the window real focus, because
+        // KeyBindingManager ignores keystrokes when the document is unfocused.
+        await run(`(() => {
+          editor.cursorController.setCursorPosition(1, 0);
+          editor.setSelected(true);
+          return document.hasFocus();
+        })()`);
+        win.focus();
+        await waitForCondition(
+          async () => (await run("document.hasFocus()")) === true,
+          { timeout: 10000, description: "the window to hold keyboard focus" },
+        );
+
+        // AltGr+3 is how # is typed on AZERTY and most European layouts. The
+        // browser reports it as Ctrl+Alt with key "#", and it must reach the
+        // buffer as text rather than being swallowed as a shortcut.
+        const sendAltGraph = (character) => {
+          win.webContents.sendInputEvent({
+            type: "keyDown",
+            keyCode: character,
+            modifiers: ["control", "alt"],
+          });
+          win.webContents.sendInputEvent({
+            type: "keyUp",
+            keyCode: character,
+            modifiers: ["control", "alt"],
+          });
+        };
+        const buffer = () =>
+          run('editor.tabManager.activeFile?.serializeContent?.() ?? ""');
+
+        // The reported bug: # did nothing at all.
+        sendAltGraph("#");
+        await waitForCondition(async () => (await buffer()) === "#", {
+          timeout: 5000,
+          description: "# to be typed into the buffer",
+        });
+
+        // The rest of the AltGr class behaves the same way. { auto-pairs, which
+        // is the editor's existing smart-typing behaviour, so only the
+        // characters themselves are asserted.
+        for (const character of ["|", "@", "{"]) sendAltGraph(character);
+        await waitForCondition(
+          async () => {
+            const text = await buffer();
+            return ["#", "|", "@", "{"].every((character) =>
+              text.includes(character),
+            );
+          },
+          {
+            timeout: 5000,
+            description: "the remaining AltGr characters to be typed",
+          },
+        );
+        const typed = await buffer();
+        for (const character of ["#", "|", "@", "{"])
+          assert.ok(
+            typed.includes(character),
+            `AltGr character ${character} must be typed, got ${JSON.stringify(typed)}`,
+          );
+
+        // A real Ctrl+Alt shortcut must still work, so the fix is not simply
+        // "ignore Ctrl+Alt forever".
+        await run(
+          'SETTINGS_SET("keybindings.open_command", "Ctrl+Alt+P").then(result => result.success)',
+        );
+        assert.equal(
+          await run(
+            'CONFIG_KEYBINDING_GET_ACTION("open_command")?.key === "Ctrl+Alt+P"',
+          ),
+          true,
+          "the Ctrl+Alt shortcut must be configured",
+        );
+        win.webContents.sendInputEvent({
+          type: "keyDown",
+          keyCode: "P",
+          modifiers: ["control", "alt"],
+        });
+        win.webContents.sendInputEvent({
+          type: "keyUp",
+          keyCode: "P",
+          modifiers: ["control", "alt"],
+        });
+        await waitForCondition(
+          async () =>
+            (await run('editor.quickPanel.isOpen("command-palette")')) === true,
+          { timeout: 10000, description: "Ctrl+Alt+P to still open the Command Palette" },
+        );
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+        await waitForCondition(
+          async () =>
+            (await run('editor.quickPanel.isOpen("command-palette")')) === false,
+          { timeout: 10000, description: "the Command Palette to close" },
+        );
+        await run(
+          'SETTINGS_SET("keybindings.open_command", "Mod+Shift+P").then(result => result.success)',
+        );
+        traceStep("AltGr typing checks passed");
+        // Leave no unsaved edits: TabManager refuses to quit with dirty files.
+        await run(`(() => {
+          const file = editor.tabManager.activeFile;
+          if (file) editor.historyController.markSaved(file);
+          return true;
+        })()`);
       } else if (phase === "version-manager") {
         traceStep("Version Manager popup checks started");
         if (win.isFullScreen()) win.setFullScreen(false);
